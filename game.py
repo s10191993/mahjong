@@ -523,6 +523,10 @@ class Game:
         data = {
             "your_seat": seat,
             "hand": p.hand,
+            # 這一輪剛摸進來的牌：前端會把它獨立擺到最右邊，不排進手牌裡
+            "drawn": (self.last_draw
+                      if (self.phase == "await_discard" and self.turn == seat)
+                      else None),
             "self_options": self.self_options(seat),
             "reactions": self.pending.get(seat, []),
         }

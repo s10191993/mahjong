@@ -197,6 +197,28 @@ document.getElementById("btn-restart").onclick=()=>{
   if(confirm("重新洗牌發牌？本局作廢，分數保留。")) send({t:"restart"});
 };
 
+// 全螢幕（Android Chrome / iPad Safari 支援；iPhone Safari 無此 API，需「加到主畫面」）
+const fsBtn=document.getElementById("btn-fs");
+const fsSupported = !!(document.documentElement.requestFullscreen ||
+                       document.documentElement.webkitRequestFullscreen);
+const inStandalone = window.matchMedia("(display-mode: standalone)").matches ||
+                     window.matchMedia("(display-mode: fullscreen)").matches ||
+                     window.navigator.standalone === true;
+if(!fsSupported || inStandalone){
+  fsBtn.style.display="none";           // 不支援或已是 App 模式就不顯示
+}
+fsBtn.onclick=()=>{
+  const el=document.documentElement;
+  const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+  try{
+    if(isFs){ (document.exitFullscreen||document.webkitExitFullscreen).call(document); }
+    else { (el.requestFullscreen||el.webkitRequestFullscreen).call(el); }
+  }catch(e){}
+};
+document.addEventListener("fullscreenchange",()=>{
+  fsBtn.textContent = document.fullscreenElement ? "⛶" : "⛶";
+});
+
 // 音效開關
 const sndBtn=document.getElementById("btn-sound");
 function syncSoundBtn(){ sndBtn.textContent = SFX.enabled ? "🔊" : "🔇"; }
@@ -414,9 +436,15 @@ function renderMe(pub, pri){
   // 手牌（可點擊出牌）
   const handBox=document.getElementById("my-hand");
   const canDiscard = pub.phase==="await_discard" && pub.turn===mySeat;
-  const hand = pri.hand||[];
-  hand.forEach(c=>{
-    const t=tileEl(c);
+  // 剛摸到的那張獨立擺到最右邊，不排進手牌裡
+  const rest=[...(pri.hand||[])];
+  let drawn=null;
+  if(pri.drawn){
+    const i=rest.indexOf(pri.drawn);
+    if(i>=0){ rest.splice(i,1); drawn=pri.drawn; }
+  }
+  const addTile=(c,extra)=>{
+    const t=tileEl(c, extra||"");
     if(canDiscard){
       t.onclick=()=> send({t:"discard", tile:c});
       t.title="點擊打出 "+tileName(c);
@@ -424,7 +452,9 @@ function renderMe(pub, pri){
       t.style.cursor="default";
     }
     handBox.appendChild(t);
-  });
+  };
+  rest.forEach(c=> addTile(c));
+  if(drawn) addTile(drawn, "just-drawn");
 }
 
 function renderActions(pub, pri){

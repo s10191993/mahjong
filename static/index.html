@@ -2,8 +2,16 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>線上麻將 · 台灣 16 張</title>
+  <!-- 加到主畫面後以 App 模式全螢幕執行（iPhone Safari 沒有網頁全螢幕 API）-->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="線上麻將">
+  <meta name="theme-color" content="#0a5738">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -28,12 +36,15 @@
 
   <!-- 等待室 -->
   <section id="waiting" class="screen">
-    <div class="card">
-      <h2>房間代碼</h2>
-      <div id="room-code" class="room-code">----</div>
-      <p class="sub">把代碼給朋友，讓他們加入</p>
-      <button id="btn-copy" class="ghost">複製代碼</button>
-      <ul id="seat-list" class="seat-list"></ul>
+    <div class="card wait-card">
+      <div class="wait-col">
+        <h2>房間代碼</h2>
+        <div id="room-code" class="room-code">----</div>
+        <p class="sub">把代碼給朋友，讓他們加入</p>
+        <button id="btn-copy" class="ghost">複製代碼</button>
+        <ul id="seat-list" class="seat-list"></ul>
+      </div>
+      <div class="wait-col">
 
       <div id="settings" class="settings">
         <div class="set-row">
@@ -50,6 +61,7 @@
       <button id="btn-start" class="primary" disabled>開始遊戲</button>
       <p id="wait-hint" class="sub"></p>
       <button id="btn-leave-room" class="ghost small-btn">離開房間</button>
+      </div>
     </div>
   </section>
 
@@ -71,6 +83,7 @@
         <span id="info-turn"></span>
         <span id="info-dice"></span>
         <button id="btn-sound" title="音效開關">🔊</button>
+        <button id="btn-fs" title="全螢幕">⛶</button>
       </div>
 
       <div class="seat-area top" data-pos="top"></div>

@@ -1,0 +1,16 @@
+{
+  "name": "線上麻將 · 台灣 16 張",
+  "short_name": "線上麻將",
+  "description": "跟朋友連線打台灣 16 張麻將",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#0a5738",
+  "theme_color": "#0a5738",
+  "icons": [
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

@@ -14,12 +14,25 @@ html, body {
   background: radial-gradient(circle at 50% 30%, #14956b, var(--felt-dark));
   color: #fff;
   overflow: hidden;
+  /* 瀏覽器網址列會吃掉高度：用 dvh 取得「實際可見」高度 */
+  height: 100dvh;
+  /* 瀏海 / 圓角安全區 */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  overscroll-behavior: none;
 }
-.screen { display: none; height: 100vh; }
+.screen { display: none; height: 100vh; height: 100dvh; }
 .screen.active { display: flex; }
 
 /* ---------- 大廳 / 等待室 ---------- */
-#lobby, #waiting { align-items: center; justify-content: center; }
+/* 網址列擋住時仍能捲到全部內容 */
+#lobby, #waiting {
+  align-items: center; justify-content: center;
+  overflow-y: auto; padding: calc(12px + var(--sat)) 12px calc(12px + var(--sab));
+}
+#lobby .card, #waiting .card { margin: auto; }
 .card {
   background: rgba(0,0,0,.35);
   border: 1px solid rgba(255,255,255,.15);
@@ -80,8 +93,12 @@ button.ghost { background: transparent; }
 .settings input:disabled { opacity: .7; background: #e6e6e6; }
 #cfg-hint { margin: 8px 0 0; min-height: 0; }
 #info-dice { color: #ffd76b !important; font-weight: 700; }
-#btn-sound { width: auto; margin: 0; padding: 0 6px; font-size: 15px; line-height: 1;
+#btn-sound, #btn-fs { width: auto; margin: 0; padding: 0 6px; font-size: 15px; line-height: 1;
              background: transparent; border: none; cursor: pointer; }
+
+/* 剛摸到的那張：跟手牌隔開、稍微標示 */
+.hand .tile.just-drawn { margin-left: 10px; box-shadow: 0 0 0 2px var(--gold),
+                         0 3px 6px rgba(0,0,0,.5); }
 
 /* 牌桌左上角：重開 / 離開 */
 #table-ctrl { position: absolute; top: 6px; left: 6px; z-index: 12; display: flex; gap: 6px; }
@@ -106,7 +123,8 @@ button.ghost { background: transparent; }
 
 /* ---------- 牌桌 ---------- */
 #table.active { display: block; }
-#board { position: relative; width: 100vw; height: 100vh; }
+#board { position: relative; width: 100vw; height: 100vh; height: 100dvh;
+         padding: var(--sat) var(--sar) var(--sab) var(--sal); }
 .info-bar {
   position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
   display: flex; gap: 18px; font-size: 14px; background: rgba(0,0,0,.35);
@@ -205,10 +223,11 @@ button.ghost { background: transparent; }
         padding: 2px; width: 100%; }
 .hand .tile {
   cursor: pointer; transition: transform .12s; margin: 0; flex: 0 0 auto;
-  /* 除以 18（而非 17）留點邊距，牌略小一點也比較好看 */
-  width: clamp(16px, calc((100vw - 34px) / 18), 44px);
+  /* 除以 18（而非 17）留點邊距；扣掉瀏海安全區與摸牌那張的間隔 */
+  --avail: calc(100vw - var(--sal) - var(--sar) - 46px);
+  width: clamp(16px, calc(var(--avail) / 18), 44px);
   height: auto; aspect-ratio: 5 / 7;
-  font-size: clamp(13px, calc((100vw - 34px) / 18 * 0.78), 39px);
+  font-size: clamp(13px, calc(var(--avail) / 18 * 0.78), 39px);
 }
 .hand .tile:hover { transform: translateY(-12px); box-shadow: 0 8px 14px rgba(0,0,0,.5); }
 .hand .tile:active { transform: translateY(-4px); }
@@ -369,6 +388,32 @@ button.ghost { background: transparent; }
 
 /* 橫向的手機 / 矮螢幕：緊湊排版（手牌一排已由 clamp 保證） */
 @media (max-height: 520px) {
+  /* 大廳／等待室壓縮成一頁看得完，不用捲 */
+  .card { padding: 14px 18px; width: min(94vw, 420px); }
+  .card h1 { font-size: 21px; margin-bottom: 2px; }
+  .card h2 { font-size: 17px; margin-bottom: 4px; }
+  .sub { font-size: 12px; margin: 2px 0 6px; }
+  label { font-size: 11px; margin: 7px 0 3px; }
+  input { padding: 7px 10px; font-size: 15px; }
+  button { padding: 9px; margin-top: 7px; font-size: 15px; }
+  .divider { margin: 8px 0 2px; font-size: 11px; }
+  .err { font-size: 11px; min-height: 12px; margin-top: 5px; }
+  .room-code { font-size: 30px; letter-spacing: 5px; margin: 2px 0; }
+  /* 4 個座位排成 2×2，省一半高度 */
+  .seat-list { margin: 6px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .seat-list li { padding: 4px 8px; margin: 0; font-size: 12px; }
+  /* 等待室改左右兩欄：左邊房號＋座位、右邊設定＋按鈕，一頁看得完 */
+  .wait-card { width: min(96vw, 660px); display: flex; gap: 16px; text-align: center; }
+  .wait-card .wait-col { flex: 1; min-width: 0; display: flex; flex-direction: column;
+                         justify-content: center; }
+  .wait-card .seat-list { grid-template-columns: 1fr; }
+  #btn-copy { margin-top: 4px; }
+  #btn-leave-room { margin-top: 4px; padding: 6px; font-size: 12px; }
+  #wait-hint { margin: 4px 0 0; }
+  .settings { padding: 8px 10px; margin: 5px 0 2px; }
+  .settings .toggle { margin: 7px 0 0; }
+  .settings .toggle small { display: inline; }
+  #cfg-hint { margin: 4px 0 0; }
   #board { height: 100vh; height: 100dvh; }
   .info-bar { gap: 10px; font-size: 12px; padding: 4px 12px; top: 4px; }
   .seat-area.top { top: 34px; }
@@ -412,8 +457,8 @@ button.ghost { background: transparent; }
 /* 極矮螢幕（手機橫向又被瀏覽器網址列吃掉高度）：再壓縮一級。
    必須放在 max-height:520 之後，否則會被它蓋掉。 */
 @media (max-height: 360px) {
-  .hand .tile { width: clamp(14px, calc((100vw - 34px) / 19), 34px);
-                font-size: clamp(12px, calc((100vw - 34px) / 19 * 0.78), 30px); }
+  .hand .tile { width: clamp(14px, calc(var(--avail) / 19), 34px);
+                font-size: clamp(12px, calc(var(--avail) / 19 * 0.78), 30px); }
   .tile.small { --tw: 17px; --th: 24px; font-size: 14px; }
   .tile.mini  { --tw: 13px; --th: 18px; font-size: 11px; }
   .side-row .hand-backs .tile.back { --tw: 10px; --th: 15px; }
