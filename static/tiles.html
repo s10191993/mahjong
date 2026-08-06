@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>牌面總覽 · 對色用</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    html,body{ overflow:auto; height:auto; }
+    body{ padding:20px 12px 60px; }
+    h1{ text-align:center; font-size:22px; margin-bottom:4px; }
+    .hint{ text-align:center; color:rgba(255,255,255,.6); font-size:13px; margin-bottom:20px; }
+    .group{ margin:0 auto 26px; max-width:820px; }
+    .group h2{ font-size:16px; color:var(--gold); margin:0 0 10px; padding-left:6px;
+               border-left:4px solid var(--gold); }
+    .row{ display:flex; flex-wrap:wrap; gap:14px; }
+    .cell{ display:flex; flex-direction:column; align-items:center; gap:5px; }
+    .cell .label{ font-size:12px; color:rgba(255,255,255,.75); }
+    /* 對色用：牌放大 */
+    .gallery .tile{ width:66px; height:92px; font-size:58px; }
+  </style>
+</head>
+<body class="gallery">
+  <h1>🀄 牌面總覽</h1>
+  <p class="hint">跟你的實體牌逐顆對色，哪顆不對就跟我說「X筒要OO色」</p>
+  <div id="board-tiles"></div>
+
+  <script src="/static/tiles.js"></script>
+  <script>
+    const GROUPS = [
+      ["萬", ["m1","m2","m3","m4","m5","m6","m7","m8","m9"]],
+      ["筒", ["p1","p2","p3","p4","p5","p6","p7","p8","p9"]],
+      ["條", ["s1","s2","s3","s4","s5","s6","s7","s8","s9"]],
+      ["字牌", ["we","ws","ww","wn","dz","df","db"]],
+      ["花", ["f1","f2","f3","f4","f5","f6","f7","f8"]],
+    ];
+    const root = document.getElementById("board-tiles");
+    for (const [name, codes] of GROUPS) {
+      const g = document.createElement("div"); g.className = "group";
+      const h = document.createElement("h2"); h.textContent = name; g.appendChild(h);
+      const row = document.createElement("div"); row.className = "row";
+      for (const code of codes) {
+        const cell = document.createElement("div"); cell.className = "cell";
+        cell.appendChild(tileEl(code));
+        const lb = document.createElement("div"); lb.className = "label";
+        lb.textContent = tileName(code);
+        cell.appendChild(lb);
+        row.appendChild(cell);
+      }
+      g.appendChild(row); root.appendChild(g);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+把牌面圖檔放進這個資料夾（static/tiles/），檔名照下表，副檔名用 .png。
+放好後重新整理遊戲或牌面總覽頁即可看到；沒放的牌會自動用內建自繪牌面。
+（若你的圖是 .jpg 或想用一張大圖切，跟我說，我幫你調。）
+
+── 萬 ──
+m1.png=一萬  m2.png=二萬  m3.png=三萬  m4.png=四萬  m5.png=五萬
+m6.png=六萬  m7.png=七萬  m8.png=八萬  m9.png=九萬
+
+── 筒 ──
+p1.png=一筒  p2.png=二筒  p3.png=三筒  p4.png=四筒  p5.png=五筒
+p6.png=六筒  p7.png=七筒  p8.png=八筒  p9.png=九筒
+
+── 條 ──
+s1.png=一條  s2.png=二條  s3.png=三條  s4.png=四條  s5.png=五條
+s6.png=六條  s7.png=七條  s8.png=八條  s9.png=九條
+
+── 字牌 ──
+we.png=東  ws.png=南  ww.png=西  wn.png=北
+dz.png=中  df.png=發  db.png=白
+
+── 花 ──
+f1.png=春  f2.png=夏  f3.png=秋  f4.png=冬
+f5.png=梅  f6.png=蘭  f7.png=菊  f8.png=竹
+
+── 牌背（可選）──
+back.png=牌背（不放就用內建斜紋）

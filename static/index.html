@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>線上麻將 · 台灣 16 張</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- 大廳 -->
+  <section id="lobby" class="screen active">
+    <div class="card">
+      <h1>🀄 線上麻將</h1>
+      <p class="sub">台灣 16 張 · 跟朋友連線對戰</p>
+      <label>你的暱稱
+        <input id="name-input" maxlength="12" placeholder="輸入暱稱" autocomplete="off">
+      </label>
+      <button id="btn-create" class="primary">開新房間</button>
+      <div class="divider"><span>或</span></div>
+      <label>房間代碼
+        <input id="code-input" maxlength="4" placeholder="4 碼英文" autocomplete="off"
+               style="text-transform:uppercase">
+      </label>
+      <button id="btn-join">加入房間</button>
+      <p id="lobby-err" class="err"></p>
+    </div>
+  </section>
+
+  <!-- 等待室 -->
+  <section id="waiting" class="screen">
+    <div class="card">
+      <h2>房間代碼</h2>
+      <div id="room-code" class="room-code">----</div>
+      <p class="sub">把代碼給朋友，讓他們加入</p>
+      <button id="btn-copy" class="ghost">複製代碼</button>
+      <ul id="seat-list" class="seat-list"></ul>
+
+      <div id="settings" class="settings">
+        <div class="set-row">
+          <label>底<input id="cfg-base" type="number" min="0" step="10" value="100"></label>
+          <label>每台<input id="cfg-tai" type="number" min="0" step="5" value="20"></label>
+        </div>
+        <label class="toggle">
+          <input id="cfg-dice" type="checkbox">
+          <span>開啟骰規<small>（全紅／順子 +1 台、豹子翻倍）</small></span>
+        </label>
+        <p id="cfg-hint" class="sub"></p>
+      </div>
+
+      <button id="btn-start" class="primary" disabled>開始遊戲</button>
+      <p id="wait-hint" class="sub"></p>
+    </div>
+  </section>
+
+  <!-- 牌桌 -->
+  <section id="table" class="screen">
+    <div id="rotate-hint">
+      <div class="rot-emoji">📱</div>
+      <p>請將手機橫放</p>
+      <small>橫向才能把 17 張牌一次排開</small>
+    </div>
+    <div id="board">
+      <div class="info-bar">
+        <span id="info-round"></span>
+        <span id="info-wall"></span>
+        <span id="info-turn"></span>
+        <span id="info-dice"></span>
+        <button id="btn-sound" title="音效開關">🔊</button>
+      </div>
+
+      <div class="seat-area top" data-pos="top"></div>
+      <div class="seat-area left" data-pos="left"></div>
+      <div class="seat-area right" data-pos="right"></div>
+
+      <div id="center-pool"></div>
+      <div id="turn-pointer" aria-hidden="true"></div>
+
+      <div class="seat-area bottom" data-pos="bottom">
+        <div class="melds" id="my-melds"></div>
+        <div class="hand" id="my-hand"></div>
+      </div>
+
+      <div id="action-bar"></div>
+    </div>
+
+    <!-- 結算 -->
+    <div id="result-overlay" class="overlay">
+      <div class="result-card">
+        <h2 id="result-title"></h2>
+        <div id="result-detail"></div>
+        <table id="score-table"></table>
+        <button id="btn-next" class="primary">下一局</button>
+        <p id="next-hint" class="sub"></p>
+      </div>
+    </div>
+  </section>
+
+  <script src="/static/tiles.js"></script>
+  <script src="/static/sounds.js"></script>
+  <script src="/static/client.js"></script>
+</body>
+</html>
