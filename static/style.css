@@ -504,3 +504,115 @@ button.ghost { background: transparent; }
   #table-ctrl button { padding: 3px 8px; font-size: 11px; }
   .melds { margin: 2px 0; }
 }
+
+/* ============================================================
+   德州撲克
+   ============================================================ */
+/* 大廳的遊戲選擇 */
+.game-pick { display: flex; gap: 8px; margin: 10px 0 2px; }
+.game-pick .gp {
+  flex: 1; width: auto; margin: 0; padding: 10px 6px; font-size: 15px;
+  border-radius: 10px; background: rgba(255,255,255,.08);
+  border: 2px solid transparent; color: rgba(255,255,255,.75);
+}
+.game-pick .gp.active { background: var(--gold); color: #4a3500; font-weight: 800;
+                        border-color: #fff6; }
+
+/* 撲克牌 */
+.pcard {
+  position: relative; display: inline-flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  width: 46px; height: 64px; border-radius: 6px; background: #fff;
+  box-shadow: 0 2px 5px rgba(0,0,0,.45); user-select: none; line-height: 1;
+  font-weight: 800;
+}
+.pcard.red   { color: #d0271d; }
+.pcard.black { color: #1a1a1a; }
+.pcard .pc-r { font-size: 22px; }
+.pcard .pc-s { font-size: 20px; }
+.pcard.back {
+  background: repeating-linear-gradient(45deg,#1f5fa8,#1f5fa8 5px,#174b85 5px,#174b85 10px);
+  box-shadow: 0 2px 5px rgba(0,0,0,.45), inset 0 0 0 2px #ffffff30;
+}
+.pcard.slot { background: rgba(255,255,255,.07); box-shadow: none;
+              border: 1px dashed rgba(255,255,255,.18); }
+.pcard.mini { width: 22px; height: 31px; border-radius: 4px; }
+.pcard.mini .pc-r { font-size: 11px; } .pcard.mini .pc-s { font-size: 10px; }
+.pcard.dim { opacity: .4; }
+
+/* 牌桌 */
+#poker.active { display: block; }
+#pk-board { position: fixed; inset: 0; }
+#pk-ctrl { position: absolute; top: calc(6px + var(--sat)); left: max(6px, var(--sal));
+           z-index: 12; display: flex; gap: 6px; }
+#pk-ctrl button { width: auto; margin: 0; padding: 5px 10px; font-size: 12px;
+  border-radius: 14px; background: rgba(0,0,0,.42); color: rgba(255,255,255,.9);
+  border: 1px solid rgba(255,255,255,.22); font-weight: 600; }
+#pk-next { background: var(--gold)!important; color: #4a3500!important; }
+.pk-info { position: absolute; top: calc(8px + var(--sat)); left: 50%;
+  transform: translateX(-50%); display: flex; gap: 14px; font-size: 13px;
+  background: rgba(0,0,0,.35); padding: 5px 14px; border-radius: 20px; z-index: 5;
+  white-space: nowrap; color: var(--gold); }
+
+/* 中央：底池 + 公牌 */
+#pk-center { position: absolute; top: 45%; left: 50%; transform: translate(-50%,-50%);
+  text-align: center; z-index: 3; }
+#pk-pot { font-size: 15px; color: var(--gold); margin-bottom: 6px; }
+#pk-board-cards { display: flex; gap: 5px; justify-content: center; }
+#pk-msg { margin-top: 8px; font-size: 15px; background: rgba(0,0,0,.6);
+  padding: 6px 14px; border-radius: 10px; display: none; }
+#pk-msg.show { display: inline-block; }
+
+/* 其他玩家 */
+#pk-seats { position: absolute; inset: 0; }
+.pk-seat { position: absolute; transform: translate(-50%,-50%); text-align: center;
+  background: rgba(0,0,0,.42); border: 1px solid rgba(255,255,255,.15);
+  border-radius: 10px; padding: 4px 8px; min-width: 76px; font-size: 12px; }
+.pk-seat.acting { border-color: var(--gold); box-shadow: 0 0 14px var(--gold);
+                  animation: plate-pulse 1s ease-in-out infinite; }
+.pk-seat.folded { opacity: .42; }
+.pk-name { font-weight: 700; white-space: nowrap; }
+.pk-stack { color: #6bffa0; font-weight: 700; }
+.pk-bet { color: var(--gold); font-size: 11px; }
+.pk-act { color: rgba(255,255,255,.6); font-size: 11px; }
+.pk-desc { color: var(--gold); font-size: 11px; margin-top: 2px; }
+.pk-desc.mine { font-size: 13px; }
+.pk-mini { display: flex; gap: 2px; justify-content: center; margin-bottom: 2px; }
+.btn-d { display: inline-block; background: #fff; color: #111; font-weight: 900;
+  border-radius: 50%; width: 15px; height: 15px; line-height: 15px; font-size: 10px;
+  margin-right: 3px; }
+
+/* 我自己 */
+#pk-me { position: absolute; bottom: max(4px, var(--sab)); left: 50%;
+  transform: translateX(-50%); text-align: center; width: 100%; }
+.pk-me-info { font-size: 13px; margin-bottom: 4px; }
+.pk-hole-cards { display: flex; gap: 6px; justify-content: center; }
+#pk-actions { display: flex; gap: 8px; justify-content: center; align-items: center;
+  flex-wrap: wrap; margin-top: 8px; padding: 0 8px; }
+.pk-btn { width: auto; margin: 0; padding: 11px 20px; font-size: 16px; font-weight: 800;
+  border-radius: 12px; border: none; color: #fff;
+  box-shadow: 0 4px 0 rgba(0,0,0,.3); }
+.pk-fold  { background: #6b4a4a; }
+.pk-check { background: #3f7d5c; }
+.pk-call  { background: #2f7fb8; }
+.pk-raise-go { background: #d08a1d; }
+.pk-allin { background: #c0392b; }
+.pk-raise { display: flex; flex-direction: column; align-items: center; gap: 3px;
+            min-width: 150px; }
+.pk-raise-val { font-size: 12px; color: var(--gold); font-weight: 700; }
+.pk-raise input[type=range] { width: 150px; }
+.pk-quick { display: flex; gap: 4px; }
+.pk-mini-btn { width: auto; margin: 0; padding: 3px 8px; font-size: 11px;
+  border-radius: 8px; background: rgba(255,255,255,.15); color: #fff;
+  border: 1px solid rgba(255,255,255,.2); }
+
+@media (max-height: 520px) {
+  .pcard { width: 34px; height: 48px; }
+  .pcard .pc-r { font-size: 16px; } .pcard .pc-s { font-size: 15px; }
+  .pcard.mini { width: 17px; height: 24px; }
+  .pk-seat { min-width: 62px; font-size: 11px; padding: 3px 6px; }
+  .pk-btn { padding: 9px 15px; font-size: 14px; }
+  .pk-info { font-size: 11px; padding: 3px 10px; }
+  #pk-actions { margin-top: 4px; gap: 6px; }
+  .pk-raise, .pk-raise input[type=range] { min-width: 120px; width: 120px; }
+}

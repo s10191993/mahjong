@@ -20,12 +20,17 @@ from aiohttp import web, WSMsgType
 
 import mahjong as mj
 from game import Game, SEAT_WINDS
+import poker as pk
+from poker_game import PokerTable, STREETS as POKER_STREETS
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
 
 DEFAULT_BASE = 100      # 預設底
 DEFAULT_TAI = 20        # 預設每台
+DEFAULT_SB = 10         # 德州：預設小盲
+DEFAULT_BB = 20         # 德州：預設大盲
+DEFAULT_STACK = 1000    # 德州：預設起始籌碼
 rooms: dict[str, "Room"] = {}
 
 
@@ -64,11 +69,19 @@ class Seat:
 
 
 class Room:
-    def __init__(self, code: str):
+    def __init__(self, code: str, game_type: str = "mahjong"):
         self.code = code
-        self.seats: list[Seat | None] = [None, None, None, None]
+        self.game_type = game_type if game_type in ("mahjong", "poker") else "mahjong"
+        self.max_seats = 8 if self.game_type == "poker" else 4
+        self.min_players = 2 if self.game_type == "poker" else 4
+        self.seats: list[Seat | None] = [None] * self.max_seats
         self.host_seat = 0
         self.game: Game | None = None
+        # 德州撲克
+        self.table: PokerTable | None = None
+        self.small_blind = DEFAULT_SB
+        self.big_blind = DEFAULT_BB
+        self.start_stack = DEFAULT_STACK
         self.dealer = 0
         self.round_wind = "we"        # 由 round_index 推導，保留欄位相容
         self.dealer_streak = 0
@@ -113,6 +126,7 @@ class Room:
     def abandon_game(self):
         """中止進行中的牌局，回到等待室（分數保留）。"""
         self.game = None
+        self.table = None
         self.dice = None
         self.dice_bonus = 0
         self.dice_double = False
@@ -138,10 +152,16 @@ class Room:
         return {
             "t": "room",
             "code": self.code,
+            "game_type": self.game_type,
+            "max_seats": self.max_seats,
+            "min_players": self.min_players,
             "host_seat": self.host_seat,
-            "started": self.game is not None,
+            "started": (self.table is not None) if self.game_type == "poker"
+                       else (self.game is not None),
             "config": {"base": self.base, "tai_value": self.tai_value,
-                       "dice_rule": self.dice_rule, "rounds_target": self.rounds_target},
+                       "dice_rule": self.dice_rule, "rounds_target": self.rounds_target,
+                       "small_blind": self.small_blind, "big_blind": self.big_blind,
+                       "start_stack": self.start_stack},
             "progress": self.progress(),
             "players": [
                 None if s is None else {
@@ -158,6 +178,8 @@ class Room:
 
     async def broadcast_state(self):
         """牌局進行中：每位玩家送公開狀態 + 自己的私有狀態。"""
+        if self.game_type == "poker":
+            return await self._broadcast_poker()
         if not self.game:
             return
         pub = self.game.public_state()
@@ -178,6 +200,21 @@ class Room:
             if seat and seat.connected and seat.ws is not None:
                 msg = {"t": "state", "public": pub, "private": self.game.private_state(i),
                        "hand_no": self.hand_no}
+                await self._safe_send(seat.ws, msg)
+
+    async def _broadcast_poker(self):
+        """德州：公開狀態給所有人，底牌只給本人。"""
+        if not self.table:
+            return
+        pub = self.table.public_state()
+        pub["config"] = {"small_blind": self.small_blind, "big_blind": self.big_blind,
+                         "start_stack": self.start_stack}
+        pub["game_type"] = "poker"
+        for i, seat in enumerate(self.seats):
+            if seat and seat.connected and seat.ws is not None:
+                msg = {"t": "state", "game_type": "poker", "public": pub,
+                       "private": self.table.private_state(i),
+                       "hand_no": self.table.hand_no}
                 await self._safe_send(seat.ws, msg)
 
     async def _send_all(self, payload: dict):
@@ -336,7 +373,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
             if t == "create":
                 name = (m.get("name") or "玩家").strip()[:12]
                 code = new_code()
-                room = Room(code)
+                room = Room(code, game_type=m.get("game_type") or "mahjong")
                 rooms[code] = room
                 token = secrets.token_hex(8)
                 seat = Seat(name, token)
@@ -345,7 +382,8 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 room.seats[0] = seat
                 room.host_seat = 0
                 seat_idx = 0
-                await send({"t": "joined", "code": code, "seat": 0, "token": token})
+                await send({"t": "joined", "code": code, "seat": 0, "token": token,
+                            "game_type": room.game_type})
                 await room.broadcast_lobby()
 
             # ---- 大廳：加入 ----
@@ -361,7 +399,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     continue
                 free = r.find_free_seat()
                 if free is None:
-                    await err("房間已滿（4 人）")
+                    await err(f"房間已滿（{r.max_seats} 人）")
                     continue
                 token = secrets.token_hex(8)
                 seat = Seat(name, token)
@@ -370,7 +408,8 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 r.seats[free] = seat
                 room = r
                 seat_idx = free
-                await send({"t": "joined", "code": code, "seat": free, "token": token})
+                await send({"t": "joined", "code": code, "seat": free, "token": token,
+                            "game_type": r.game_type})
                 await room.broadcast_lobby()
 
             # ---- 重新連線 ----
@@ -392,7 +431,8 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 seat_idx = idx
                 r.seats[idx].ws = ws
                 r.seats[idx].connected = True
-                await send({"t": "joined", "code": code, "seat": idx, "token": token})
+                await send({"t": "joined", "code": code, "seat": idx, "token": token,
+                            "game_type": r.game_type})
                 await room.broadcast_lobby()
                 if room.game:
                     await room.broadcast_state()
@@ -419,6 +459,16 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                         room.rounds_target = rt
                 except (TypeError, ValueError):
                     pass
+                # 德州：大小盲與起始籌碼
+                try:
+                    sb = int(m.get("small_blind", room.small_blind))
+                    bb = int(m.get("big_blind", room.big_blind))
+                    stk = int(m.get("start_stack", room.start_stack))
+                    room.small_blind = max(1, min(sb, 100000))
+                    room.big_blind = max(room.small_blind, min(bb, 200000))
+                    room.start_stack = max(room.big_blind * 2, min(stk, 10000000))
+                except (TypeError, ValueError):
+                    pass
                 await room.broadcast_lobby()
 
             # ---- 房主開局 ----
@@ -426,8 +476,18 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 if not room or seat_idx != room.host_seat:
                     await err("只有房主可以開局")
                     continue
-                if room.occupied() < 4:
-                    await err("要 4 個人才能開局")
+                if room.occupied() < room.min_players:
+                    await err(f"要 {room.min_players} 個人才能開局")
+                    continue
+                if room.game_type == "poker":
+                    room.table = PokerTable(room.small_blind, room.big_blind,
+                                            room.start_stack)
+                    for i, s in enumerate(room.seats):
+                        if s:
+                            room.table.seat_player(i, s.name)
+                    room.table.start_hand()
+                    await room.broadcast_state()
+                    await room.broadcast_lobby()
                     continue
                 # 擲骰決定莊家（從房主位置起算）
                 for s in room.seats:
@@ -472,8 +532,8 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 if not room or seat_idx != room.host_seat:
                     await err("只有房主可以重開牌局")
                     continue
-                if room.occupied() < 4:
-                    await err("要 4 個人才能開局")
+                if room.occupied() < room.min_players:
+                    await err(f"要 {room.min_players} 個人才能開局")
                     continue
                 room.abandon_game()
                 if room.finished:
@@ -499,12 +559,36 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 if not room or seat_idx != room.host_seat:
                     await err("只有房主可以開下一局")
                     continue
+                if room.game_type == "poker":
+                    if not room.table:
+                        await err("還沒開始")
+                        continue
+                    if len(room.table.active_seats()) < 2:
+                        await err("剩下的人不足 2 位，請重開牌局")
+                        continue
+                    room.table.start_hand()
+                    await room.broadcast_state()
+                    continue
                 if room.finished:
                     await err("整場已結束，請按「重開牌局」開始新的一場")
                     continue
                 if room.game and room.game.phase == "over":
                     room.start_new_hand()
                     await room.broadcast_state()
+
+            # ---- 德州：下注動作 ----
+            elif t == "poker_act" and room and room.table:
+                ok = room.table.act(seat_idx, m.get("action"), m.get("amount"))
+                if not ok:
+                    await err("這個動作現在不能執行")
+                    continue
+                await room.broadcast_state()
+                if room.table.phase == "over":
+                    # 把籌碼同步回座位分數，方便大廳顯示
+                    for i, s in enumerate(room.seats):
+                        if s and i in room.table.players:
+                            s.score = room.table.players[i].stack - room.start_stack
+                    await room.broadcast_lobby()
 
             # ---- 牌局動作 ----
             elif t in ("discard", "claim", "self") and room and room.game:

@@ -6,6 +6,26 @@ let ws=null, mySeat=null, roomCode=null, token=null;
 let lastPublic=null, lastPrivate=null;
 // 音效用：記住上一次的牌局狀態，用來偵測「發生了什麼事」
 let sfxPrev=null, curHandNo=null, hostSeat=0;
+let gameType="mahjong";          // "mahjong" | "poker"
+let pokerPrev=null;
+
+// 送出德州下注動作（poker_ui.js 會呼叫）
+function pokerAct(action, amount){
+  send({t:"poker_act", action, amount});
+}
+
+// 德州音效：依階段/動作變化播提示
+function playPokerSounds(pub){
+  const snap={phase:pub.phase, pot:pub.pot, to_act:pub.to_act,
+              board:(pub.board||[]).length};
+  if(pokerPrev){
+    if(snap.board>pokerPrev.board) SFX.play("discard");        // 發公牌
+    if(snap.pot>pokerPrev.pot) SFX.play("chow");               // 有人下注
+    if(snap.phase==="over" && pokerPrev.phase!=="over") SFX.play("hu");
+    else if(snap.to_act===mySeat && pokerPrev.to_act!==mySeat) SFX.play("your_turn");
+  }
+  pokerPrev=snap;
+}
 
 // 比較新舊狀態，播對應音效
 function playStateSounds(pub, pri){
@@ -99,6 +119,7 @@ function handle(m){
   switch(m.t){
     case "joined":
       mySeat=m.seat; roomCode=m.code; token=m.token;
+      if(m.game_type) setGameType(m.game_type);   // 加入別人的房：自動切成該房的遊戲
       localStorage.setItem("mahjong_session", JSON.stringify({code:roomCode, token}));
       document.getElementById("room-code").textContent=roomCode;
       show("waiting");
@@ -123,6 +144,13 @@ function handle(m){
       showDealerRoll(m);
       break;
     case "state":
+      if(m.game_type==="poker" || gameType==="poker"){
+        lastPublic=m.public; lastPrivate=m.private;
+        show("poker");
+        renderPoker(m.public, m.private, mySeat);
+        playPokerSounds(m.public);
+        break;
+      }
       if(m.hand_no!==undefined && m.hand_no!==curHandNo){ curHandNo=m.hand_no; sfxPrev=null; }
       lastPublic=m.public; lastPrivate=m.private;
       {
@@ -207,10 +235,26 @@ function flashError(msg){
 }
 
 // ---- 大廳 ----
+// 大廳：選遊戲類型
+function setGameType(g){
+  gameType = (g==="poker") ? "poker" : "mahjong";
+  document.querySelectorAll(".gp").forEach(b=>
+    b.classList.toggle("active", b.dataset.game===gameType));
+  const poker = gameType==="poker";
+  document.getElementById("lobby-title").textContent = poker ? "🃏 德州撲克" : "🀄 線上麻將";
+  document.getElementById("lobby-sub").textContent =
+    poker ? "最多 8 人 · 跟朋友連線對戰" : "台灣 16 張 · 跟朋友連線對戰";
+  const pc=document.getElementById("poker-cfg"), mc=document.getElementById("mj-cfg");
+  if(pc) pc.style.display = poker ? "" : "none";
+  if(mc) mc.style.display = poker ? "none" : "";
+}
+document.querySelectorAll(".gp").forEach(b=>
+  b.onclick=()=> setGameType(b.dataset.game));
+
 document.getElementById("btn-create").onclick=()=>{
   const name=document.getElementById("name-input").value.trim()||"玩家";
   localStorage.removeItem("mahjong_session");
-  send({t:"create", name});
+  send({t:"create", name, game_type:gameType});
 };
 document.getElementById("btn-join").onclick=()=>{
   const name=document.getElementById("name-input").value.trim()||"玩家";
@@ -280,10 +324,17 @@ function sendConfig(){
     base: parseInt(document.getElementById("cfg-base").value)||0,
     tai_value: parseInt(document.getElementById("cfg-tai").value)||0,
     rounds_target: parseInt(document.getElementById("cfg-rounds").value)||1,
-    dice_rule: document.getElementById("cfg-dice").checked});
+    dice_rule: document.getElementById("cfg-dice").checked,
+    small_blind: parseInt(document.getElementById("cfg-sb").value)||10,
+    big_blind: parseInt(document.getElementById("cfg-bb").value)||20,
+    start_stack: parseInt(document.getElementById("cfg-stack").value)||1000});
 }
-["cfg-base","cfg-tai","cfg-rounds","cfg-dice"].forEach(id=>
+["cfg-base","cfg-tai","cfg-rounds","cfg-dice","cfg-sb","cfg-bb","cfg-stack"].forEach(id=>
   document.getElementById(id).addEventListener("change", sendConfig));
+
+// 德州牌桌的離開／下一手
+document.getElementById("pk-leave").onclick=()=> doLeave("確定退出牌局回大廳？");
+document.getElementById("pk-next").onclick=()=> send({t:"next"});
 document.getElementById("btn-next").onclick=()=>{
   send({t:"next"});
   document.getElementById("result-overlay").classList.remove("show");
@@ -291,7 +342,9 @@ document.getElementById("btn-next").onclick=()=>{
 
 // ---- 等待室 ----
 function renderWaiting(m){
+  if(m.game_type) setGameType(m.game_type);
   const ul=document.getElementById("seat-list"); ul.innerHTML="";
+  const minPlayers=m.min_players||4;
   let filled=0;
   m.players.forEach((p,i)=>{
     const li=document.createElement("li");
@@ -321,10 +374,10 @@ function renderWaiting(m){
 
   const startBtn=document.getElementById("btn-start");
   startBtn.style.display = isHost ? "block":"none";
-  startBtn.disabled = filled<4;
+  startBtn.disabled = filled<minPlayers;
   document.getElementById("wait-hint").textContent =
-    filled<4 ? `目前 ${filled}/4 人，還需 ${4-filled} 人` :
-    (isHost? "人齊了，按開始！" : "等待房主開始…");
+    filled<minPlayers ? `目前 ${filled} 人，還需 ${minPlayers-filled} 人才能開始` :
+    (isHost? `人數 ${filled}/${m.max_seats||4}，可以開始！` : "等待房主開始…");
   if(m.started){ /* 已開局，等 state 訊息 */ }
 }
 

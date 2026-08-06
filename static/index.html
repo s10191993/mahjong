@@ -18,8 +18,12 @@
   <!-- 大廳 -->
   <section id="lobby" class="screen active">
     <div class="card">
-      <h1>🀄 線上麻將</h1>
-      <p class="sub">台灣 16 張 · 跟朋友連線對戰</p>
+      <h1 id="lobby-title">🀄 線上麻將</h1>
+      <p class="sub" id="lobby-sub">台灣 16 張 · 跟朋友連線對戰</p>
+      <div class="game-pick">
+        <button type="button" class="gp active" data-game="mahjong">🀄 麻將</button>
+        <button type="button" class="gp" data-game="poker">🃏 德州撲克</button>
+      </div>
       <label>你的暱稱
         <input id="name-input" maxlength="12" placeholder="輸入暱稱" autocomplete="off">
       </label>
@@ -47,6 +51,16 @@
       <div class="wait-col">
 
       <div id="settings" class="settings">
+        <!-- 德州設定 -->
+        <div id="poker-cfg" style="display:none">
+          <div class="set-row">
+            <label>小盲<input id="cfg-sb" type="number" min="1" step="5" value="10"></label>
+            <label>大盲<input id="cfg-bb" type="number" min="1" step="10" value="20"></label>
+          </div>
+          <label>起始籌碼<input id="cfg-stack" type="number" min="10" step="100" value="1000"></label>
+        </div>
+        <!-- 麻將設定 -->
+        <div id="mj-cfg">
         <div class="set-row">
           <label>底<input id="cfg-base" type="number" min="0" step="10" value="100"></label>
           <label>每台<input id="cfg-tai" type="number" min="0" step="5" value="20"></label>
@@ -62,6 +76,7 @@
           <input id="cfg-dice" type="checkbox">
           <span>開啟骰規<small>（全紅／順子 +1 台、豹子翻倍）</small></span>
         </label>
+        </div>
         <p id="cfg-hint" class="sub"></p>
       </div>
 
@@ -120,8 +135,37 @@
     </div>
   </section>
 
+  <!-- 德州撲克牌桌 -->
+  <section id="poker" class="screen">
+    <div id="pk-board">
+      <div id="pk-ctrl">
+        <button id="pk-leave" title="退出牌局回大廳">✕ 離開</button>
+        <button id="pk-next" title="開下一手">▶ 下一手</button>
+      </div>
+      <div class="pk-info">
+        <span id="pk-blinds"></span>
+        <span id="pk-handno"></span>
+        <span id="pk-phase"></span>
+      </div>
+
+      <div id="pk-seats"></div>
+
+      <div id="pk-center">
+        <div id="pk-pot"></div>
+        <div id="pk-board-cards"></div>
+        <div id="pk-msg"></div>
+      </div>
+
+      <div id="pk-me">
+        <div id="pk-hole"></div>
+        <div id="pk-actions"></div>
+      </div>
+    </div>
+  </section>
+
   <script src="/static/tiles.js"></script>
   <script src="/static/sounds.js"></script>
+  <script src="/static/poker_ui.js"></script>
   <script src="/static/client.js"></script>
 </body>
 </html>
