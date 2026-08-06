@@ -482,6 +482,7 @@ class Game:
                and self.discard_count <= 4)
         return {
             "win_type": wt or "normal",
+            "discarder": discarder,
             "after_kong": self.after_kong and self_draw,
             "qianggang": self.qianggang,
             "haidi": self_draw and self.is_last_draw,
@@ -692,8 +693,15 @@ def score_hand(game: Game, seat: int, win_tile: str, self_draw: bool,
         add("門清", TAI["門清"])
         if self_draw:
             add("門清自摸", TAI["門清自摸"])
+    # 莊家台：只要莊家有關就算 —— 莊家胡牌、莊家放槍、或別人自摸（莊家也要付）。
+    # 唯一不算的情況是「閒家放槍給閒家」（莊家沒付錢也沒胡）。
+    _discarder = ctx.get("discarder")
     if seat == game.dealer:
         add("莊家", TAI["莊家"])
+    elif self_draw:
+        add("莊家", TAI["莊家"])              # 閒家自摸 → 莊家也要付
+    elif _discarder == game.dealer:
+        add("莊家放槍", TAI["莊家"])
     if game.dealer_streak > 0:
         add(f"連{game.dealer_streak}拉{game.dealer_streak}", TAI["連拉"] * game.dealer_streak)
     for nm, t in _flower_tai(p, seat, game.dealer):

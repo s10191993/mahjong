@@ -12,6 +12,7 @@ from game import Game, Meld, score_hand
 
 def mkgame(dealer=1, round_wind="we", streak=0):
     g = Game(dealer=dealer, round_wind=round_wind, dealer_streak=streak)
+    g.start()
     return g
 
 
@@ -96,5 +97,37 @@ print("8 槓上開花：", tot, d)
 tot, names, d = score(big3, self_draw=False, win_tile="p9", ctx_extra={"qianggang": True})
 assert "搶槓" in names, names
 print("9 搶槓：", tot, d)
+
+# 10) 莊家台：只要莊家有關就算（莊家胡／莊家放槍／別人自摸），閒家放槍給閒家才不算
+def dealer_case(winner, discarder, self_draw=False, dealer=0, streak=0):
+    g = mkgame(dealer=dealer, streak=streak)
+    p = g.players[winner]
+    p.melds = [Meld("pong", ["s5"]*3, 1), Meld("chow", ["p7","p8","p9"], 1)]
+    p.hand = ["m1","m2","m3","m4","m5","m6","p1","p2","p3","dz"]
+    p.flowers = []
+    g.any_claim, g.discard_count = True, 8
+    if self_draw:
+        p.hand.append("dz"); p.hand = mj.sort_hand(p.hand)
+        g.turn, g.phase, g.last_draw = winner, "await_discard", "dz"
+        g.declare_tsumo(winner)
+    else:
+        g.turn, g.phase = discarder, "await_discard"
+        if "dz" not in g.players[discarder].hand:
+            g.players[discarder].hand.append("dz")
+        g.discard(discarder, "dz")
+        g.claim(winner, "hu")
+    names = [n for n, _ in g.result["tai_detail"]]
+    return g.result["tai"], names
+
+t, n = dealer_case(winner=0, discarder=2)                 # 莊家胡
+assert "莊家" in n, n
+t_dealer_deal, n = dealer_case(winner=2, discarder=0)     # 莊家放槍
+assert "莊家放槍" in n, n
+t_other_deal, n = dealer_case(winner=2, discarder=3)      # 閒家放槍給閒家
+assert not any("莊家" in x for x in n), n
+assert t_dealer_deal == t_other_deal + 1, (t_dealer_deal, t_other_deal)
+t, n = dealer_case(winner=2, discarder=None, self_draw=True)   # 閒家自摸
+assert "莊家" in n, n
+print(f"10 莊家台：莊家放槍 {t_dealer_deal} 台 > 閒家放槍 {t_other_deal} 台 ✔")
 
 print("\n計分專項測試全部通過 ✔")
