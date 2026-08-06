@@ -150,8 +150,9 @@ button.ghost { background: transparent; }
 /* 牌 —— 大顆、依花色上色 */
 .tile {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 50px; height: 70px; background: linear-gradient(#ffffff, #f2efe4);
-  color: #111; border-radius: 8px; font-size: 44px; line-height: 1;
+  --tw: 44px; --th: 62px;                 /* 尺寸統一由變數驅動 */
+  width: var(--tw); height: var(--th); background: linear-gradient(#ffffff, #f2efe4);
+  color: #111; border-radius: 8px; font-size: 39px; line-height: 1;
   box-shadow: 0 3px 5px rgba(0,0,0,.45), inset 0 -4px 0 #cfc8b2,
               inset 0 2px 0 #ffffff;
   user-select: none;
@@ -204,9 +205,10 @@ button.ghost { background: transparent; }
         padding: 2px; width: 100%; }
 .hand .tile {
   cursor: pointer; transition: transform .12s; margin: 0; flex: 0 0 auto;
-  width: clamp(18px, calc((100vw - 30px) / 17), 50px);
+  /* 除以 18（而非 17）留點邊距，牌略小一點也比較好看 */
+  width: clamp(16px, calc((100vw - 34px) / 18), 44px);
   height: auto; aspect-ratio: 5 / 7;
-  font-size: clamp(15px, calc((100vw - 30px) / 17 * 0.78), 44px);
+  font-size: clamp(13px, calc((100vw - 34px) / 18 * 0.78), 39px);
 }
 .hand .tile:hover { transform: translateY(-12px); box-shadow: 0 8px 14px rgba(0,0,0,.5); }
 .hand .tile:active { transform: translateY(-4px); }
@@ -248,8 +250,9 @@ button.ghost { background: transparent; }
 
 #center-pool {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-  width: min(56vw, 420px); min-height: 120px;
-  display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr 1fr 1fr;
+  width: min(56vw, 420px);
+  /* 列高用 auto，別用 1fr —— 1fr 會讓三列都跟最高那列一樣高，把牌河撐爆 */
+  display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: auto auto auto;
   gap: 4px; place-items: center;
 }
 #center-pool .slot { display: flex; flex-direction: column; align-items: center; }
@@ -371,9 +374,14 @@ button.ghost { background: transparent; }
   .seat-area.top { top: 34px; }
   .seat-area.bottom { bottom: 2px; }
   .nameplate { font-size: 11px; padding: 2px 8px; margin-bottom: 3px; }
-  .tile.small { --tw: 22px; --th: 30px; font-size: 19px; }
-  .tile.mini  { --tw: 17px; --th: 23px; font-size: 15px; }
-  .side-row .hand-backs .tile.back { --tw: 13px; --th: 20px; }
+  .tile.small { --tw: 20px; --th: 28px; font-size: 17px; }
+  .tile.mini  { --tw: 15px; --th: 21px; font-size: 13px; }
+  .side-row .hand-backs .tile.back { --tw: 12px; --th: 18px; }
+  /* 中央「最後一張」不要用全尺寸大牌，否則會把牌河撐高蓋到手牌 */
+  #center-pool .slot.c .tile { --tw: 26px; --th: 36px; font-size: 23px; }
+  .pool-label { font-size: 9px; margin-bottom: 1px; }
+  #center-pool { width: min(52vw, 320px); gap: 2px; }
+  .discards { gap: 1px; margin-top: 2px; }
   #center-pool { width: 46vw; min-height: 80px; }
   .discards { grid-template-columns: repeat(8, auto); max-width: 40vw; }
   .my-melds, #my-melds { transform: scale(.85); }
@@ -399,4 +407,21 @@ button.ghost { background: transparent; }
   .room-code { font-size: 40px; letter-spacing: 6px; }
   .result-card { padding: 20px 18px; }
   .result-card h2 { font-size: 22px; }
+}
+
+/* 極矮螢幕（手機橫向又被瀏覽器網址列吃掉高度）：再壓縮一級。
+   必須放在 max-height:520 之後，否則會被它蓋掉。 */
+@media (max-height: 360px) {
+  .hand .tile { width: clamp(14px, calc((100vw - 34px) / 19), 34px);
+                font-size: clamp(12px, calc((100vw - 34px) / 19 * 0.78), 30px); }
+  .tile.small { --tw: 17px; --th: 24px; font-size: 14px; }
+  .tile.mini  { --tw: 13px; --th: 18px; font-size: 11px; }
+  .side-row .hand-backs .tile.back { --tw: 10px; --th: 15px; }
+  #center-pool { width: min(48vw, 280px); gap: 1px; }
+  #center-pool .slot.c .tile { --tw: 22px; --th: 30px; font-size: 19px; }
+  .seat-area.top { top: 24px; }
+  .nameplate { font-size: 10px; padding: 1px 6px; margin-bottom: 2px; }
+  .info-bar { font-size: 11px; padding: 3px 10px; top: 2px; }
+  #table-ctrl button { padding: 3px 8px; font-size: 11px; }
+  .melds { margin: 2px 0; }
 }
