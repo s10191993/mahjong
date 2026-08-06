@@ -8,7 +8,12 @@
   --danger: #e14b4b;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body {
+html {
+  /* 背景畫在 html 上，安全區外圍才不會露出黑邊 */
+  background: var(--felt-dark);
+  height: 100%;
+}
+body {
   height: 100%;
   font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
   background: radial-gradient(circle at 50% 30%, #14956b, var(--felt-dark));
@@ -90,7 +95,11 @@ button.ghost { background: transparent; }
                     margin: 12px 0 0; cursor: pointer; }
 .settings .toggle input { width: 18px; height: 18px; flex: none; }
 .settings .toggle small { color: rgba(255,255,255,.5); display: block; }
-.settings input:disabled { opacity: .7; background: #e6e6e6; }
+.settings select {
+  width: 100%; padding: 8px 10px; border-radius: 10px; border: none;
+  font-size: 15px; background: #fff; color: var(--ink); outline: none;
+}
+.settings input:disabled, .settings select:disabled { opacity: .7; background: #e6e6e6; }
 #cfg-hint { margin: 8px 0 0; min-height: 0; }
 #info-dice { color: #ffd76b !important; font-weight: 700; }
 #btn-sound, #btn-fs { width: auto; margin: 0; padding: 0 6px; font-size: 15px; line-height: 1;
@@ -101,7 +110,8 @@ button.ghost { background: transparent; }
                          0 3px 6px rgba(0,0,0,.5); }
 
 /* 牌桌左上角：重開 / 離開 */
-#table-ctrl { position: absolute; top: 6px; left: 6px; z-index: 12; display: flex; gap: 6px; }
+#table-ctrl { position: absolute; top: calc(6px + var(--sat)); left: max(6px, var(--sal));
+              z-index: 12; display: flex; gap: 6px; }
 #table-ctrl button {
   width: auto; margin: 0; padding: 5px 10px; font-size: 12px; border-radius: 14px;
   background: rgba(0,0,0,.42); color: rgba(255,255,255,.9);
@@ -110,6 +120,28 @@ button.ghost { background: transparent; }
 #table-ctrl button:hover { background: rgba(0,0,0,.6); }
 #btn-leave-game:hover { background: #a02c2c; border-color: #d05a5a; }
 .small-btn { font-size: 13px; padding: 9px; opacity: .8; }
+
+/* 開局擲骰決定莊家 */
+#dealer-roll {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%) scale(.9);
+  background: rgba(0,0,0,.88); border: 2px solid var(--gold); border-radius: 16px;
+  padding: 18px 32px; z-index: 70; text-align: center; pointer-events: none;
+  opacity: 0; transition: opacity .25s, transform .25s;
+  box-shadow: 0 10px 40px rgba(0,0,0,.6);
+}
+#dealer-roll.show { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+#dealer-roll .dr-title { font-size: 13px; color: rgba(255,255,255,.6); margin-bottom: 6px; }
+#dealer-roll .dr-dice { font-size: 52px; line-height: 1.1; color: #fff; letter-spacing: 4px; }
+#dealer-roll .dr-res { font-size: 15px; margin-top: 6px; color: rgba(255,255,255,.85); }
+#dealer-roll .dr-dealer { color: var(--gold); font-weight: 800; font-size: 18px; }
+
+/* 整場結束的最終排名 */
+.final-box { margin-top: 12px; padding-top: 10px; border-top: 2px solid var(--gold); }
+.final-title { color: var(--gold); font-weight: 800; margin-bottom: 6px; }
+.final-rank { list-style: none; margin: 0; padding: 0; }
+.final-rank li { display: flex; justify-content: space-between; padding: 3px 6px;
+                 border-bottom: 1px dashed rgba(255,255,255,.12); font-size: 14px; }
+.final-rank .pos { color: #6bffa0; } .final-rank .neg { color: #ff8b8b; }
 
 /* 全畫面提示訊息 */
 #notice-toast {
@@ -123,20 +155,22 @@ button.ghost { background: transparent; }
 
 /* ---------- 牌桌 ---------- */
 #table.active { display: block; }
-#board { position: relative; width: 100vw; height: 100vh; height: 100dvh;
-         padding: var(--sat) var(--sar) var(--sab) var(--sal); }
+/* 牌桌滿版鋪滿（不加內距，否則整桌被縮小、手牌會被擠出畫面）；
+   安全區改由各元件自己閃避 */
+#board { position: fixed; inset: 0; width: 100%; height: 100%; }
 .info-bar {
-  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  position: absolute; top: calc(8px + var(--sat)); left: 50%; transform: translateX(-50%);
   display: flex; gap: 18px; font-size: 14px; background: rgba(0,0,0,.35);
   padding: 6px 16px; border-radius: 20px; z-index: 5; white-space: nowrap;
 }
 .info-bar span { color: var(--gold); }
 
+/* 各區自己閃避瀏海安全區（牌桌本身維持滿版） */
 .seat-area { position: absolute; display: flex; flex-direction: column; align-items: center; }
-.seat-area.bottom { bottom: 4px; left: 50%; transform: translateX(-50%); width: 100%; }
-.seat-area.top { top: 46px; left: 50%; transform: translateX(-50%); }
-.seat-area.left { left: 6px; top: 50%; transform: translateY(-50%); }
-.seat-area.right { right: 6px; top: 50%; transform: translateY(-50%); }
+.seat-area.bottom { bottom: max(4px, var(--sab)); left: 50%; transform: translateX(-50%); width: 100%; }
+.seat-area.top { top: calc(46px + var(--sat)); left: 50%; transform: translateX(-50%); }
+.seat-area.left { left: max(6px, var(--sal)); top: 50%; transform: translateY(-50%); }
+.seat-area.right { right: max(6px, var(--sar)); top: 50%; transform: translateY(-50%); }
 
 .nameplate {
   font-size: 13px; padding: 4px 12px; border-radius: 16px;

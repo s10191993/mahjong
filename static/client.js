@@ -61,6 +61,17 @@ function playStateSounds(pub, pri){
   sfxPrev=snap;
 }
 
+// 手機在剛進牌桌 / 轉向 / 網址列收合時，可視高度會變動；
+// 多重畫幾次確保版面用的是最終尺寸（否則手牌可能被裁在畫面外）。
+function scheduleRelayout(){
+  [0, 150, 400, 900].forEach(d=> setTimeout(()=>{ if(lastPublic) renderTable(); }, d));
+}
+["resize","orientationchange"].forEach(ev=>
+  window.addEventListener(ev, ()=>{ if(lastPublic) scheduleRelayout(); }));
+if(window.visualViewport){
+  window.visualViewport.addEventListener("resize", ()=>{ if(lastPublic) renderTable(); });
+}
+
 // ---- 畫面切換 ----
 function show(id){
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
@@ -108,11 +119,20 @@ function handle(m){
     case "notice":
       showNotice(m.msg);
       break;
+    case "dealer_roll":
+      showDealerRoll(m);
+      break;
     case "state":
       if(m.hand_no!==undefined && m.hand_no!==curHandNo){ curHandNo=m.hand_no; sfxPrev=null; }
       lastPublic=m.public; lastPrivate=m.private;
-      show("table");
-      renderTable();
+      {
+        const first = !document.getElementById("table").classList.contains("active");
+        show("table");
+        renderTable();
+        // 第一次進牌桌：手機的網址列/安全區此時可能還在變動，
+        // 稍後再重畫一次，避免版面（尤其手牌）算在舊尺寸上被裁掉
+        if(first) scheduleRelayout();
+      }
       playStateSounds(m.public, m.private);
       break;
     case "reconnect_failed":
@@ -127,6 +147,36 @@ function handle(m){
       flashError(m.msg);
       break;
   }
+}
+
+// 開局擲骰決定莊家：骰子滾動動畫 + 結果
+const DICE_FACE=["","⚀","⚁","⚂","⚃","⚄","⚅"];
+function showDealerRoll(m){
+  let el=document.getElementById("dealer-roll");
+  if(!el){
+    el=document.createElement("div"); el.id="dealer-roll";
+    el.innerHTML='<div class="dr-title">擲骰決定莊家</div>'+
+                 '<div class="dr-dice"></div><div class="dr-res"></div>';
+    document.body.appendChild(el);
+  }
+  const diceEl=el.querySelector(".dr-dice"), resEl=el.querySelector(".dr-res");
+  resEl.textContent="";
+  el.classList.add("show");
+  SFX.play("discard");
+  // 滾動動畫
+  let n=0;
+  const spin=setInterval(()=>{
+    diceEl.textContent=[0,0,0].map(()=>DICE_FACE[1+Math.floor(Math.random()*6)]).join(" ");
+    if(++n>8){
+      clearInterval(spin);
+      diceEl.textContent=m.dice.map(d=>DICE_FACE[d]).join(" ");
+      resEl.innerHTML=`${m.dice.join(" + ")} = <b>${m.total}</b><br>`+
+                      `<span class="dr-dealer">${escapeHtml(m.dealer_name||"")} 做莊</span>`;
+      SFX.play("kong");
+    }
+  }, 90);
+  clearTimeout(showDealerRoll._t);
+  showDealerRoll._t=setTimeout(()=>el.classList.remove("show"), 2600);
 }
 
 // 全畫面短暫提示（例如「有玩家離開，本局中止」）
@@ -229,9 +279,10 @@ function sendConfig(){
   send({t:"set_config",
     base: parseInt(document.getElementById("cfg-base").value)||0,
     tai_value: parseInt(document.getElementById("cfg-tai").value)||0,
+    rounds_target: parseInt(document.getElementById("cfg-rounds").value)||1,
     dice_rule: document.getElementById("cfg-dice").checked});
 }
-["cfg-base","cfg-tai","cfg-dice"].forEach(id=>
+["cfg-base","cfg-tai","cfg-rounds","cfg-dice"].forEach(id=>
   document.getElementById(id).addEventListener("change", sendConfig));
 document.getElementById("btn-next").onclick=()=>{
   send({t:"next"});
@@ -261,8 +312,9 @@ function renderWaiting(m){
   const cfg = m.config||{};
   document.getElementById("cfg-base").value = cfg.base ?? 100;
   document.getElementById("cfg-tai").value = cfg.tai_value ?? 20;
+  document.getElementById("cfg-rounds").value = String(cfg.rounds_target ?? 1);
   document.getElementById("cfg-dice").checked = !!cfg.dice_rule;
-  ["cfg-base","cfg-tai","cfg-dice"].forEach(id=>
+  ["cfg-base","cfg-tai","cfg-rounds","cfg-dice"].forEach(id=>
     document.getElementById(id).disabled = !isHost);
   document.getElementById("cfg-hint").textContent =
     isHost ? "（房主可調整；開局後鎖定）" : "由房主設定";
@@ -284,7 +336,10 @@ function relPos(seat){
 function renderTable(){
   const pub=lastPublic, pri=lastPrivate;
   // 資訊列
-  document.getElementById("info-round").textContent=`${WIND_CN[pub.round_wind]}圈`;
+  const pg=pub.progress;
+  document.getElementById("info-round").textContent =
+    pg ? `${WIND_CN[pg.round_wind]}圈 ${pg.round_index+1}/${pg.rounds_target}`
+       : `${WIND_CN[pub.round_wind]}圈`;
   document.getElementById("info-wall").textContent=`剩 ${pub.wall_left} 張`;
   const turnName = pub.players[pub.turn]?.name||"";
   document.getElementById("info-turn").textContent=
@@ -605,10 +660,33 @@ function renderResult(pub){
       `<td class="${sc>=0?'pos':'neg'}">${sc>=0?'+':''}${sc}</td>`;
     tbl.appendChild(tr);
   });
+  // 整場結束 → 顯示最終排名
+  const done = pub.progress && pub.progress.finished;
+  if(done && pub.standings){
+    const fin=document.createElement("div"); fin.className="final-box";
+    const rt=pub.progress.rounds_target;
+    fin.innerHTML=`<div class="final-title">🏆 ${rt===4?"一將":rt+"圈"}打完　最終排名</div>`;
+    const ol=document.createElement("ol"); ol.className="final-rank";
+    pub.standings.forEach((s,i)=>{
+      const li=document.createElement("li");
+      li.innerHTML=`<span>${["🥇","🥈","🥉","4."][i]||""} ${escapeHtml(s.name)}`+
+        `${s.seat===mySeat?"（你）":""}</span>`+
+        `<span class="${s.score>=0?'pos':'neg'}">${s.score>=0?'+':''}${s.score}</span>`;
+      ol.appendChild(li);
+    });
+    fin.appendChild(ol);
+    detail.appendChild(fin);
+  }
+
   // 只有房主能開下一局（房主可能因原房主離開而換人）
   const isHost = mySeat===hostSeat;
-  document.getElementById("btn-next").style.display = isHost?"block":"none";
-  document.getElementById("next-hint").textContent = isHost? "" : "等待房主開下一局…";
+  const nextBtn=document.getElementById("btn-next");
+  nextBtn.style.display = isHost?"block":"none";
+  nextBtn.textContent = done ? "再開一場" : "下一局";
+  if(done && isHost) nextBtn.onclick=()=>{ send({t:"restart"}); ov.classList.remove("show"); };
+  else if(isHost) nextBtn.onclick=()=>{ send({t:"next"}); ov.classList.remove("show"); };
+  document.getElementById("next-hint").textContent =
+    isHost? "" : (done? "等待房主開新的一場…" : "等待房主開下一局…");
   ov.classList.add("show");
 }
 

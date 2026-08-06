@@ -70,13 +70,19 @@ class Room:
         self.host_seat = 0
         self.game: Game | None = None
         self.dealer = 0
-        self.round_wind = "we"
+        self.round_wind = "we"        # 由 round_index 推導，保留欄位相容
         self.dealer_streak = 0
         self.hand_no = 0
         # 可由房主設定
         self.base = DEFAULT_BASE
         self.tai_value = DEFAULT_TAI
         self.dice_rule = False
+        self.rounds_target = 1        # 打幾圈：1圈 / 2圈 / 4圈(1將)
+        # 局數進度
+        self.round_index = 0          # 0=東圈 1=南圈 2=西圈 3=北圈
+        self.start_dealer = 0         # 本圈的起莊（骰子決定）
+        self.finished = False         # 整場是否已結束
+        self.start_dice = None        # 決定莊家的骰子
         # 本局骰子結果
         self.dice = None            # [d1,d2,d3]
         self.dice_bonus = 0
@@ -135,7 +141,8 @@ class Room:
             "host_seat": self.host_seat,
             "started": self.game is not None,
             "config": {"base": self.base, "tai_value": self.tai_value,
-                       "dice_rule": self.dice_rule},
+                       "dice_rule": self.dice_rule, "rounds_target": self.rounds_target},
+            "progress": self.progress(),
             "players": [
                 None if s is None else {
                     "seat": i, "name": s.name,
@@ -162,8 +169,11 @@ class Room:
             sp["wind"] = SEAT_WINDS[(i - self.game.dealer) % 4]
         # 底/台 與 骰子資訊
         pub["config"] = {"base": self.base, "tai_value": self.tai_value,
-                         "dice_rule": self.dice_rule}
+                         "dice_rule": self.dice_rule, "rounds_target": self.rounds_target}
         pub["dice"] = self.dice_info()
+        pub["progress"] = self.progress()
+        if self.finished:
+            pub["standings"] = self.standings()
         for i, seat in enumerate(self.seats):
             if seat and seat.connected and seat.ws is not None:
                 msg = {"t": "state", "public": pub, "private": self.game.private_state(i),
@@ -182,6 +192,38 @@ class Room:
             pass
 
     # ---- 開新一局 ------------------------------------------------------------
+    def roll_for_dealer(self, from_seat: int = 0):
+        """擲三顆骰決定莊家：從 from_seat 起算，數到點數總和那一家。"""
+        d = [self.rng.randint(1, 6) for _ in range(3)]
+        total = sum(d)
+        dealer = (from_seat + total - 1) % 4
+        self.start_dice = {"values": d, "total": total, "dealer": dealer}
+        self.dealer = dealer
+        self.start_dealer = dealer
+        self.dealer_streak = 0
+        self.round_index = 0
+        self.round_wind = SEAT_WINDS[0]
+        self.finished = False
+        return self.start_dice
+
+    def progress(self) -> dict:
+        return {
+            "round_index": self.round_index,
+            "rounds_target": self.rounds_target,
+            "round_wind": SEAT_WINDS[self.round_index % 4],
+            "dealer": self.dealer,
+            "dealer_streak": self.dealer_streak,
+            "finished": self.finished,
+            "start_dice": self.start_dice,
+            "hand_no": self.hand_no,
+        }
+
+    def standings(self) -> list:
+        return sorted(
+            [{"seat": i, "name": s.name, "score": s.score}
+             for i, s in enumerate(self.seats) if s],
+            key=lambda x: -x["score"])
+
     def dice_info(self):
         if not self.dice_rule or not self.dice:
             return None
@@ -194,6 +236,7 @@ class Room:
             self.dice, self.dice_bonus, self.dice_double, self.dice_patterns = roll_dice(self.rng)
         else:
             self.dice, self.dice_bonus, self.dice_double, self.dice_patterns = None, 0, False, []
+        self.round_wind = SEAT_WINDS[self.round_index % 4]
         self.game = Game(dealer=self.dealer, round_wind=self.round_wind,
                          dealer_streak=self.dealer_streak)
         self.game.start()
@@ -205,8 +248,9 @@ class Room:
             return
         res = g.result
         if res["type"] == "draw":
-            # 流局：連莊
+            # 流局：連莊（不換莊，圈數不推進）
             self.dealer_streak += 1
+            res["progress"] = self.progress()
             return
         winners = res.get("winners") or [{"seat": res["winner"], "tai": res["tai"]}]
 
@@ -244,8 +288,21 @@ class Room:
         if any(w["seat"] == self.dealer for w in winners):
             self.dealer_streak += 1
         else:
-            self.dealer = (self.dealer + 1) % 4
-            self.dealer_streak = 0
+            self._rotate_dealer()
+        res["progress"] = self.progress()
+        if self.finished:
+            res["standings"] = self.standings()
+
+    def _rotate_dealer(self):
+        """換莊；轉回起莊表示一圈結束，圈數滿了就整場結束。"""
+        self.dealer = (self.dealer + 1) % 4
+        self.dealer_streak = 0
+        if self.dealer == self.start_dealer:
+            self.round_index += 1
+            if self.round_index >= self.rounds_target:
+                self.finished = True
+            else:
+                self.round_wind = SEAT_WINDS[self.round_index % 4]
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +413,12 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 except (TypeError, ValueError):
                     pass
                 room.dice_rule = bool(m.get("dice_rule", room.dice_rule))
+                try:
+                    rt = int(m.get("rounds_target", room.rounds_target))
+                    if rt in (1, 2, 4):
+                        room.rounds_target = rt
+                except (TypeError, ValueError):
+                    pass
                 await room.broadcast_lobby()
 
             # ---- 房主開局 ----
@@ -366,8 +429,20 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 if room.occupied() < 4:
                     await err("要 4 個人才能開局")
                     continue
-                room.dealer = 0
-                room.dealer_streak = 0
+                # 擲骰決定莊家（從房主位置起算）
+                for s in room.seats:
+                    if s:
+                        s.score = 0
+                room.hand_no = 0
+                sd = room.roll_for_dealer(from_seat=room.host_seat)
+                dealer_name = room.seats[sd["dealer"]].name if room.seats[sd["dealer"]] else ""
+                await room._send_all({
+                    "t": "dealer_roll",
+                    "dice": sd["values"], "total": sd["total"],
+                    "dealer": sd["dealer"], "dealer_name": dealer_name,
+                    "msg": f"🎲 {'·'.join(map(str, sd['values']))} = {sd['total']} → {dealer_name} 做莊",
+                })
+                await asyncio.sleep(1.6)      # 讓大家看清楚骰子結果
                 room.start_new_hand()
                 await room.broadcast_state()
 
@@ -401,14 +476,31 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     await err("要 4 個人才能開局")
                     continue
                 room.abandon_game()
+                if room.finished:
+                    # 整場已打完 → 重開新的一場：分數歸零、重新擲骰決定莊家
+                    for s in room.seats:
+                        if s:
+                            s.score = 0
+                    room.hand_no = 0
+                    sd = room.roll_for_dealer(from_seat=room.host_seat)
+                    nm = room.seats[sd["dealer"]].name if room.seats[sd["dealer"]] else ""
+                    await room._send_all({
+                        "t": "dealer_roll", "dice": sd["values"], "total": sd["total"],
+                        "dealer": sd["dealer"], "dealer_name": nm,
+                        "msg": f"🎲 {'·'.join(map(str, sd['values']))} = {sd['total']} → {nm} 做莊"})
+                    await asyncio.sleep(1.6)
+                else:
+                    await room._send_all({"t": "notice", "msg": "房主重開了牌局"})
                 room.start_new_hand()
-                await room._send_all({"t": "notice", "msg": "房主重開了牌局"})
                 await room.broadcast_state()
 
             # ---- 下一局 ----
             elif t == "next":
                 if not room or seat_idx != room.host_seat:
                     await err("只有房主可以開下一局")
+                    continue
+                if room.finished:
+                    await err("整場已結束，請按「重開牌局」開始新的一場")
                     continue
                 if room.game and room.game.phase == "over":
                     room.start_new_hand()
