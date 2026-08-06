@@ -49,6 +49,7 @@
 
       <button id="btn-start" class="primary" disabled>開始遊戲</button>
       <p id="wait-hint" class="sub"></p>
+      <button id="btn-leave-room" class="ghost small-btn">離開房間</button>
     </div>
   </section>
 
@@ -60,6 +61,10 @@
       <small>橫向才能把 17 張牌一次排開</small>
     </div>
     <div id="board">
+      <div id="table-ctrl">
+        <button id="btn-restart" title="重新洗牌發牌（分數保留）">↻ 重開</button>
+        <button id="btn-leave-game" title="退出牌局回大廳">✕ 離開</button>
+      </div>
       <div class="info-bar">
         <span id="info-round"></span>
         <span id="info-wall"></span>

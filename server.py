@@ -91,6 +91,27 @@ class Room:
     def anyone_connected(self) -> bool:
         return any(s and s.connected for s in self.seats)
 
+    def reassign_host(self):
+        """房主離開後，把房主交給還在的人（優先給已連線的）。"""
+        if self.seats[self.host_seat] is not None:
+            return
+        for i, s in enumerate(self.seats):
+            if s and s.connected:
+                self.host_seat = i
+                return
+        for i, s in enumerate(self.seats):
+            if s:
+                self.host_seat = i
+                return
+
+    def abandon_game(self):
+        """中止進行中的牌局，回到等待室（分數保留）。"""
+        self.game = None
+        self.dice = None
+        self.dice_bonus = 0
+        self.dice_double = False
+        self.dice_patterns = []
+
     def occupied(self) -> int:
         return sum(1 for s in self.seats if s is not None)
 
@@ -348,6 +369,40 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 room.dealer = 0
                 room.dealer_streak = 0
                 room.start_new_hand()
+                await room.broadcast_state()
+
+            # ---- 離開房間（退出牌局，回大廳）----
+            elif t == "leave":
+                if not room or seat_idx is None:
+                    await send({"t": "left"})
+                    continue
+                r, idx = room, seat_idx
+                r.seats[idx] = None
+                # 牌局進行中有人退出 → 中止本局，其他人回等待室（分數保留）
+                if r.game is not None:
+                    r.abandon_game()
+                    await r._send_all({"t": "notice",
+                                       "msg": "有玩家離開，本局中止，回到等待室"})
+                r.reassign_host()
+                r.touch()
+                await send({"t": "left"})        # 通知自己已離開
+                room, seat_idx = None, None
+                if r.occupied() == 0:
+                    rooms.pop(r.code, None)      # 沒人了就收掉房間
+                else:
+                    await r.broadcast_lobby()
+
+            # ---- 房主重開牌局（重新洗牌發牌，分數保留）----
+            elif t == "restart":
+                if not room or seat_idx != room.host_seat:
+                    await err("只有房主可以重開牌局")
+                    continue
+                if room.occupied() < 4:
+                    await err("要 4 個人才能開局")
+                    continue
+                room.abandon_game()
+                room.start_new_hand()
+                await room._send_all({"t": "notice", "msg": "房主重開了牌局"})
                 await room.broadcast_state()
 
             # ---- 下一局 ----

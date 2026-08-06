@@ -83,6 +83,27 @@ button.ghost { background: transparent; }
 #btn-sound { width: auto; margin: 0; padding: 0 6px; font-size: 15px; line-height: 1;
              background: transparent; border: none; cursor: pointer; }
 
+/* 牌桌左上角：重開 / 離開 */
+#table-ctrl { position: absolute; top: 6px; left: 6px; z-index: 12; display: flex; gap: 6px; }
+#table-ctrl button {
+  width: auto; margin: 0; padding: 5px 10px; font-size: 12px; border-radius: 14px;
+  background: rgba(0,0,0,.42); color: rgba(255,255,255,.9);
+  border: 1px solid rgba(255,255,255,.22); font-weight: 600;
+}
+#table-ctrl button:hover { background: rgba(0,0,0,.6); }
+#btn-leave-game:hover { background: #a02c2c; border-color: #d05a5a; }
+.small-btn { font-size: 13px; padding: 9px; opacity: .8; }
+
+/* 全畫面提示訊息 */
+#notice-toast {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%) scale(.9);
+  background: rgba(0,0,0,.85); color: #fff; padding: 14px 26px; border-radius: 12px;
+  font-size: 16px; font-weight: 600; z-index: 60; pointer-events: none;
+  border: 1px solid rgba(255,255,255,.2); box-shadow: 0 8px 30px rgba(0,0,0,.5);
+  opacity: 0; transition: opacity .25s, transform .25s; white-space: nowrap;
+}
+#notice-toast.show { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+
 /* ---------- 牌桌 ---------- */
 #table.active { display: block; }
 #board { position: relative; width: 100vw; height: 100vh; }

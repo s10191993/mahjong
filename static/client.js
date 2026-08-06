@@ -5,7 +5,7 @@
 let ws=null, mySeat=null, roomCode=null, token=null;
 let lastPublic=null, lastPrivate=null;
 // 音效用：記住上一次的牌局狀態，用來偵測「發生了什麼事」
-let sfxPrev=null, curHandNo=null;
+let sfxPrev=null, curHandNo=null, hostSeat=0;
 
 // 比較新舊狀態，播對應音效
 function playStateSounds(pub, pri){
@@ -93,7 +93,20 @@ function handle(m){
       show("waiting");
       break;
     case "room":
+      hostSeat = m.host_seat ?? 0;
       renderWaiting(m);
+      // 牌局被中止（有人離開／尚未開始）→ 從牌桌回到等待室
+      if(!m.started && document.getElementById("table").classList.contains("active")){
+        document.getElementById("result-overlay").classList.remove("show");
+        lastPublic=null; lastPrivate=null; sfxPrev=null;
+        show("waiting");
+      }
+      break;
+    case "left":
+      backToLobby();
+      break;
+    case "notice":
+      showNotice(m.msg);
       break;
     case "state":
       if(m.hand_no!==undefined && m.hand_no!==curHandNo){ curHandNo=m.hand_no; sfxPrev=null; }
@@ -114,6 +127,20 @@ function handle(m){
       flashError(m.msg);
       break;
   }
+}
+
+// 全畫面短暫提示（例如「有玩家離開，本局中止」）
+function showNotice(msg){
+  if(!msg) return;
+  let el=document.getElementById("notice-toast");
+  if(!el){
+    el=document.createElement("div"); el.id="notice-toast";
+    document.body.appendChild(el);
+  }
+  el.textContent=msg;
+  el.classList.add("show");
+  clearTimeout(showNotice._t);
+  showNotice._t=setTimeout(()=>el.classList.remove("show"), 3200);
 }
 
 function flashError(msg){
@@ -148,6 +175,27 @@ document.getElementById("btn-copy").onclick=()=>{
   b.textContent="已複製！"; setTimeout(()=>b.textContent=o,1500);
 };
 document.getElementById("btn-start").onclick=()=> send({t:"start"});
+
+// 離開房間 / 離開牌局 / 重開牌局
+function doLeave(msg){
+  if(!confirm(msg)) return;
+  send({t:"leave"});
+  // 保險：伺服器沒回應也讓自己回大廳
+  setTimeout(()=>{ if(!document.getElementById("lobby").classList.contains("active")) backToLobby(); }, 1200);
+}
+function backToLobby(){
+  localStorage.removeItem("mahjong_session");
+  mySeat=null; roomCode=null; token=null; hostSeat=0;
+  lastPublic=null; lastPrivate=null; sfxPrev=null; curHandNo=null;
+  document.getElementById("result-overlay").classList.remove("show");
+  show("lobby");
+}
+document.getElementById("btn-leave-room").onclick=()=> doLeave("確定離開這個房間？");
+document.getElementById("btn-leave-game").onclick=()=> doLeave("確定退出牌局回大廳？本局會中止。");
+document.getElementById("btn-restart").onclick=()=>{
+  if(mySeat!==hostSeat){ flashError("只有房主可以重開牌局"); return; }
+  if(confirm("重新洗牌發牌？本局作廢，分數保留。")) send({t:"restart"});
+};
 
 // 音效開關
 const sndBtn=document.getElementById("btn-sound");
@@ -230,6 +278,9 @@ function renderTable(){
     ptr.style.transform=`translate(-50%,-50%) rotate(${rot}deg) translateY(-74px)`;
     ptr.classList.toggle("mine", pub.turn===mySeat);
   }
+  // 只有房主看得到「重開」
+  document.getElementById("btn-restart").style.display =
+    (mySeat===hostSeat) ? "" : "none";
   // 骰規骰子
   const diceEl=document.getElementById("info-dice");
   if(pub.dice){
@@ -499,8 +550,8 @@ function renderResult(pub){
       `<td class="${sc>=0?'pos':'neg'}">${sc>=0?'+':''}${sc}</td>`;
     tbl.appendChild(tr);
   });
-  // 只有房主能開下一局
-  const isHost = mySeat===0; // 房主固定座位0；伺服器會擋，非房主按了也沒用
+  // 只有房主能開下一局（房主可能因原房主離開而換人）
+  const isHost = mySeat===hostSeat;
   document.getElementById("btn-next").style.display = isHost?"block":"none";
   document.getElementById("next-hint").textContent = isHost? "" : "等待房主開下一局…";
   ov.classList.add("show");
