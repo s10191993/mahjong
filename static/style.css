@@ -215,11 +215,30 @@ button.ghost { background: transparent; }
 .tile.back { background: repeating-linear-gradient(45deg, #2e7d5b, #2e7d5b 6px, #276f50 6px, #276f50 12px);
              color: transparent;
              box-shadow: 0 2px 3px rgba(0,0,0,.4), inset 0 0 0 2px #ffffff2e; }
-.tile.small { width: 26px; height: 36px; font-size: 23px; border-radius: 5px; }
-.tile.mini  { width: 20px; height: 27px; font-size: 18px; border-radius: 4px; }
+/* 尺寸統一用 --tw/--th 驅動，旋轉時才好長寬對調 */
+.tile.small { --tw: 26px; --th: 36px; width: var(--tw); height: var(--th);
+              font-size: 23px; border-radius: 5px; }
+.tile.mini  { --tw: 20px; --th: 27px; width: var(--tw); height: var(--th);
+              font-size: 18px; border-radius: 4px; }
 
 .hand-backs, .melds { display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; }
-.seat-area.left .hand-backs, .seat-area.right .hand-backs { flex-direction: column; }
+
+/* 左右家：牌轉 90 度、亮牌擺在手牌前面（靠桌中央那側） */
+.side-row { display: flex; align-items: center; gap: 6px; }
+.side-row.left  { flex-direction: row; }          /* 手牌在左、亮牌在右（靠中央）*/
+.side-row.right { flex-direction: row-reverse; }  /* 手牌在右、亮牌在左（靠中央）*/
+.side-row .hand-backs { flex-direction: column; gap: 1px; }
+.side-row .melds { flex-direction: column; gap: 3px; align-items: flex-start; }
+.side-row .meld-group { flex-direction: column; gap: 1px; margin: 0; }
+
+/* 轉 90 度的牌：外框長寬對調（!important 蓋過各尺寸與手機媒體查詢），內容旋轉 */
+.tile.rot { width: var(--th) !important; height: var(--tw) !important; }
+.tile.rot > * {
+  position: absolute; width: var(--tw); height: var(--th);
+  left: 50%; top: 50%; transform-origin: center;
+}
+.seat-area.left  .tile.rot > * { transform: translate(-50%,-50%) rotate(90deg); }
+.seat-area.right .tile.rot > * { transform: translate(-50%,-50%) rotate(-90deg); }
 .melds { margin: 4px 0; }
 .meld-group { display: inline-flex; gap: 1px; margin: 0 3px; padding: 2px;
               background: rgba(0,0,0,.2); border-radius: 4px; }
@@ -352,10 +371,9 @@ button.ghost { background: transparent; }
   .seat-area.top { top: 34px; }
   .seat-area.bottom { bottom: 2px; }
   .nameplate { font-size: 11px; padding: 2px 8px; margin-bottom: 3px; }
-  .tile.small { width: 22px; height: 30px; font-size: 19px; }
-  .tile.mini  { width: 17px; height: 23px; font-size: 15px; }
-  .seat-area.left .hand-backs .tile.back,
-  .seat-area.right .hand-backs .tile.back { width: 14px; height: 20px; }
+  .tile.small { --tw: 22px; --th: 30px; font-size: 19px; }
+  .tile.mini  { --tw: 17px; --th: 23px; font-size: 15px; }
+  .side-row .hand-backs .tile.back { --tw: 13px; --th: 20px; }
   #center-pool { width: 46vw; min-height: 80px; }
   .discards { grid-template-columns: repeat(8, auto); max-width: 40vw; }
   .my-melds, #my-melds { transform: scale(.85); }

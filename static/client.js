@@ -324,28 +324,53 @@ function nameplate(pl, pub){
 
 function renderOpponent(pl, pos, pub){
   const area=document.querySelector(`.seat-area.${pos}`);
+  const side = (pos==="left"||pos==="right");
+  const rot  = side ? "rot" : "";        // 左右家的牌轉 90 度
   area.appendChild(nameplate(pl, pub));
+
   // 手牌背面
   const backs=document.createElement("div"); backs.className="hand-backs";
-  for(let i=0;i<pl.hand_count;i++) backs.appendChild(tileEl("we","back small"));
-  area.appendChild(backs);
+  for(let i=0;i<pl.hand_count;i++) backs.appendChild(tileEl("we","back small "+rot));
+
   // 亮牌 + 花
   const melds=document.createElement("div"); melds.className="melds";
-  pl.melds.forEach(md=> melds.appendChild(meldGroup(md)));
+  pl.melds.forEach(md=> melds.appendChild(meldGroup(md, rot)));
   if(pl.flowers.length){
     const fg=document.createElement("div"); fg.className="meld-group";
-    pl.flowers.forEach(f=> fg.appendChild(tileEl(f,"small")));
+    pl.flowers.forEach(f=> fg.appendChild(tileEl(f,"small "+rot)));
     melds.appendChild(fg);
   }
-  area.appendChild(melds);
+
+  if(side){
+    // 左右家：亮牌擺在手牌「前面」（靠牌桌中央那側）
+    const rowEl=document.createElement("div");
+    rowEl.className="side-row "+pos;
+    rowEl.append(backs, melds);
+    area.appendChild(rowEl);
+  }else{
+    area.append(backs, melds);
+  }
 }
 
-function meldGroup(md){
+// 吃的牌擺法：手上兩張維持順序，吃來的那張放中間（例：1筒2筒 吃 3筒 → 1筒 3筒 2筒）
+function meldTileOrder(md){
+  if(md.kind==="ankong") return [md.tiles[0],"back","back",md.tiles[0]];
+  if(md.kind==="chow" && md.claimed){
+    const others=[...md.tiles];
+    const i=others.indexOf(md.claimed);
+    if(i>=0){
+      others.splice(i,1);                    // 去掉吃來的那張
+      return [others[0], md.claimed, others[1]];
+    }
+  }
+  return md.tiles;
+}
+
+function meldGroup(md, cls=""){
   const g=document.createElement("div"); g.className="meld-group";
-  const codes = (md.kind==="ankong") ? [md.tiles[0],"back","back",md.tiles[0]] : md.tiles;
-  codes.forEach(c=>{
-    if(c==="back") g.appendChild(tileEl("we","back small"));
-    else g.appendChild(tileEl(c,"small"));
+  meldTileOrder(md).forEach(c=>{
+    if(c==="back") g.appendChild(tileEl("we","back small "+cls));
+    else g.appendChild(tileEl(c,"small "+cls));
   });
   return g;
 }
@@ -468,8 +493,8 @@ function revealHand(rev, winTile){
   // 亮出的面子
   (rev.melds||[]).forEach(md=>{
     const g=document.createElement("div"); g.className="reveal-meld";
-    const codes=(md.kind==="ankong")?[md.tiles[0],"back","back",md.tiles[0]]:md.tiles;
-    codes.forEach(c=> g.appendChild(tileEl(c==="back"?"we":c, c==="back"?"rv back":"rv")));
+    meldTileOrder(md).forEach(c=> g.appendChild(
+      tileEl(c==="back"?"we":c, c==="back"?"rv back":"rv")));
     row.appendChild(g);
   });
   box.appendChild(row);

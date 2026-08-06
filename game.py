@@ -26,13 +26,16 @@ HAND_SIZE = 16
 class Meld:
     """一組亮出的面子。kind: 'pong'|'chow'|'kong'|'ankong'（暗槓）|'addkong'（加槓）"""
 
-    def __init__(self, kind: str, tiles: list[str], from_seat: Optional[int] = None):
+    def __init__(self, kind: str, tiles: list[str], from_seat: Optional[int] = None,
+                 claimed: Optional[str] = None):
         self.kind = kind
         self.tiles = tiles
         self.from_seat = from_seat   # 這張是從哪一家來的（暗槓為 None）
+        self.claimed = claimed       # 吃/碰/槓 進來的那一張（給前端擺位用）
 
     def to_dict(self):
-        return {"kind": self.kind, "tiles": self.tiles, "from_seat": self.from_seat}
+        return {"kind": self.kind, "tiles": self.tiles,
+                "from_seat": self.from_seat, "claimed": self.claimed}
 
 
 class Player:
@@ -360,7 +363,7 @@ class Game:
         p = self.players[seat]
         p.hand.remove(tile)
         p.hand.remove(tile)
-        p.melds.append(Meld("pong", [tile] * 3, from_seat=discarder))
+        p.melds.append(Meld("pong", [tile] * 3, from_seat=discarder, claimed=tile))
         self._remove_discard_tile(discarder)
         self.any_claim = True
         self.turn = seat
@@ -373,7 +376,7 @@ class Game:
         p = self.players[seat]
         for _ in range(3):
             p.hand.remove(tile)
-        p.melds.append(Meld("kong", [tile] * 4, from_seat=discarder))
+        p.melds.append(Meld("kong", [tile] * 4, from_seat=discarder, claimed=tile))
         self._remove_discard_tile(discarder)
         self.any_claim = True
         self.turn = seat
@@ -392,7 +395,7 @@ class Game:
         for o in others:
             p.hand.remove(o)
         meld_tiles = mj.sort_hand([tile] + others)
-        p.melds.append(Meld("chow", meld_tiles, from_seat=discarder))
+        p.melds.append(Meld("chow", meld_tiles, from_seat=discarder, claimed=tile))
         self._remove_discard_tile(discarder)
         self.any_claim = True
         self.turn = seat
