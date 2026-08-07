@@ -82,6 +82,7 @@ class Room:
         self.small_blind = DEFAULT_SB
         self.big_blind = DEFAULT_BB
         self.start_stack = DEFAULT_STACK
+        self.bounty_27 = True        # 2-7 收池／秀牌，每家付 2.5 大盲
         self.dealer = 0
         self.round_wind = "we"        # 由 round_index 推導，保留欄位相容
         self.dealer_streak = 0
@@ -161,7 +162,7 @@ class Room:
             "config": {"base": self.base, "tai_value": self.tai_value,
                        "dice_rule": self.dice_rule, "rounds_target": self.rounds_target,
                        "small_blind": self.small_blind, "big_blind": self.big_blind,
-                       "start_stack": self.start_stack},
+                       "start_stack": self.start_stack, "bounty_27": self.bounty_27},
             "progress": self.progress(),
             "players": [
                 None if s is None else {
@@ -208,7 +209,7 @@ class Room:
             return
         pub = self.table.public_state()
         pub["config"] = {"small_blind": self.small_blind, "big_blind": self.big_blind,
-                         "start_stack": self.start_stack}
+                         "start_stack": self.start_stack, "bounty_27": self.bounty_27}
         pub["game_type"] = "poker"
         for i, seat in enumerate(self.seats):
             if seat and seat.connected and seat.ws is not None:
@@ -469,6 +470,8 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     room.start_stack = max(room.big_blind * 2, min(stk, 10000000))
                 except (TypeError, ValueError):
                     pass
+                if "bounty_27" in m:
+                    room.bounty_27 = bool(m.get("bounty_27"))
                 await room.broadcast_lobby()
 
             # ---- 房主開局 ----
@@ -481,7 +484,8 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     continue
                 if room.game_type == "poker":
                     room.table = PokerTable(room.small_blind, room.big_blind,
-                                            room.start_stack)
+                                            room.start_stack,
+                                            bounty_27=room.bounty_27)
                     for i, s in enumerate(room.seats):
                         if s:
                             room.table.seat_player(i, s.name)
@@ -575,6 +579,19 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 if room.game and room.game.phase == "over":
                     room.start_new_hand()
                     await room.broadcast_state()
+
+            # ---- 德州：秀牌（沒攤牌就收池的贏家可選擇亮牌，2-7 才領得到獎金）----
+            elif t == "poker_show" and room and room.table:
+                if not room.table.show_cards(seat_idx):
+                    await err("現在不能秀牌")
+                    continue
+                nm = room.seats[seat_idx].name if room.seats[seat_idx] else ""
+                b = (room.table.result or {}).get("bounty27")
+                msg = f"{nm} 秀牌"
+                if b:
+                    msg = f"🎉 {nm} 用 2-7 收池！每家付 {b['each']}，共收 {b['total']}"
+                await room._send_all({"t": "notice", "msg": msg})
+                await room.broadcast_state()
 
             # ---- 德州：補碼 ----
             elif t == "rebuy" and room and room.table:

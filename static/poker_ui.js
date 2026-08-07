@@ -183,6 +183,11 @@ function renderPoker(pub, pri, mySeat){
     const amt=Object.values(r.payouts||{}).reduce((a,b)=>a+b,0);
     msg.innerHTML=`<b>${escapeHtml(names)}</b> 贏得 <b>${money(amt)}</b>`+
       (r.type==="fold_win"?"（其他人都蓋牌）":"");
+    if(r.bounty27){
+      const b=r.bounty27;
+      msg.innerHTML+=`<div class="pk-bounty">🎉 <b>2·7 收池</b>　`+
+        `每家付 ${money(b.each)}，共收 <b>${money(b.total)}</b></div>`;
+    }
     msg.classList.add("show");
   }else{
     msg.classList.remove("show"); msg.innerHTML="";
@@ -196,6 +201,21 @@ function renderPokerActions(pub, pri, mySeat){
   const bar=document.getElementById("pk-actions"); bar.innerHTML="";
   const nextBtn=document.getElementById("pk-next");
   nextBtn.style.display = (pub.phase==="over") ? "" : "none";
+
+  // 收池沒攤牌 → 可選擇秀牌（2-7 才領得到獎金）
+  if(pri.can_show){
+    const box=document.createElement("div"); box.className="pk-show";
+    const b=document.createElement("button");
+    b.className="pk-btn pk-show-btn"; b.textContent="秀牌";
+    b.onclick=()=> send({t:"poker_show"});
+    box.appendChild(b);
+    if(pri.bounty_27){
+      const hint=document.createElement("span"); hint.className="pk-show-hint";
+      hint.textContent=`手拿 2·7 秀牌，每家付 ${money(pri.bounty_each)}`;
+      box.appendChild(hint);
+    }
+    bar.appendChild(box);
+  }
 
   // 補碼（籌碼低於 300 且不在牌局中）
   if(pri.can_rebuy){

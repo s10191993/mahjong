@@ -327,9 +327,11 @@ function sendConfig(){
     dice_rule: document.getElementById("cfg-dice").checked,
     small_blind: parseInt(document.getElementById("cfg-sb").value)||10,
     big_blind: parseInt(document.getElementById("cfg-bb").value)||20,
-    start_stack: parseInt(document.getElementById("cfg-stack").value)||1000});
+    start_stack: parseInt(document.getElementById("cfg-stack").value)||1000,
+    bounty_27: document.getElementById("cfg-bounty27").checked});
 }
-["cfg-base","cfg-tai","cfg-rounds","cfg-dice","cfg-sb","cfg-bb","cfg-stack"].forEach(id=>
+["cfg-base","cfg-tai","cfg-rounds","cfg-dice","cfg-sb","cfg-bb","cfg-stack",
+ "cfg-bounty27"].forEach(id=>
   document.getElementById(id).addEventListener("change", sendConfig));
 
 // 德州牌桌的離開／下一手
@@ -367,7 +369,13 @@ function renderWaiting(m){
   document.getElementById("cfg-tai").value = cfg.tai_value ?? 20;
   document.getElementById("cfg-rounds").value = String(cfg.rounds_target ?? 1);
   document.getElementById("cfg-dice").checked = !!cfg.dice_rule;
-  ["cfg-base","cfg-tai","cfg-rounds","cfg-dice"].forEach(id=>
+  // 德州設定
+  document.getElementById("cfg-sb").value = cfg.small_blind ?? 10;
+  document.getElementById("cfg-bb").value = cfg.big_blind ?? 20;
+  document.getElementById("cfg-stack").value = cfg.start_stack ?? 1000;
+  document.getElementById("cfg-bounty27").checked = cfg.bounty_27 !== false;
+  ["cfg-base","cfg-tai","cfg-rounds","cfg-dice",
+   "cfg-sb","cfg-bb","cfg-stack","cfg-bounty27"].forEach(id=>
     document.getElementById(id).disabled = !isHost);
   document.getElementById("cfg-hint").textContent =
     isHost ? "（房主可調整；開局後鎖定）" : "由房主設定";

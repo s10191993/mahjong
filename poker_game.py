@@ -42,9 +42,14 @@ class PokerPlayer:
 
 
 class PokerTable:
+    # 2-7 獎金：手拿 2 和 7 收池（攤牌或秀牌）時，每家額外付 2.5 個大盲
+    BOUNTY_27_BB = 2.5
+
     def __init__(self, small_blind: int = 10, big_blind: int = 20,
-                 start_stack: int = 1000, seed: Optional[int] = None):
+                 start_stack: int = 1000, seed: Optional[int] = None,
+                 bounty_27: bool = True):
         self.rng = random.Random(seed)
+        self.bounty_27 = bounty_27
         self.players: dict[int, PokerPlayer] = {}    # seat -> player
         self.small_blind = small_blind
         self.big_blind = big_blind
@@ -348,6 +353,57 @@ class PokerTable:
                 merged.append(pot)
         return merged
 
+    # ---- 2-7 獎金 -------------------------------------------------------------
+    @staticmethod
+    def has_27(hole: list[str]) -> bool:
+        """底牌是不是一張 2 一張 7（花色不拘）。"""
+        if len(hole) != 2:
+            return False
+        ranks = sorted(pk.rank_of(c) for c in hole)
+        return ranks == [2, 7]
+
+    def _apply_27_bounty(self, seat: int) -> Optional[dict]:
+        """贏家手拿 2-7 → 這手有下場的其他人每人付 2.5 個大盲（籌碼不夠就付到底）。"""
+        if not self.bounty_27:
+            return None
+        win = self.players.get(seat)
+        if not win or not self.has_27(win.hole):
+            return None
+        each = int(round(self.big_blind * self.BOUNTY_27_BB))
+        paid: dict[int, int] = {}
+        for s, p in self.players.items():
+            if s == seat or p.sitting_out:
+                continue
+            amt = min(each, p.stack)
+            if amt <= 0:
+                continue
+            p.stack -= amt
+            win.stack += amt
+            paid[s] = amt
+        if not paid:
+            return None
+        total = sum(paid.values())
+        self.log.append(f"{win.name} 2-7 獎金 每家 {each}，共收 {total}")
+        return {"seat": seat, "each": each, "total": total, "paid": paid,
+                "hole": list(win.hole)}
+
+    def show_cards(self, seat: int) -> bool:
+        """沒攤牌就收池的贏家，可選擇秀牌（亮出後若是 2-7 就領獎金）。"""
+        r = self.result
+        if not r or r.get("type") != "fold_win":
+            return False
+        if seat not in (r.get("winners") or []) or r.get("shown_by_choice"):
+            return False
+        p = self.players.get(seat)
+        if not p or not p.hole:
+            return False
+        r["shown"] = {seat: {"hole": list(p.hole), "best": [], "desc": "秀牌"}}
+        r["shown_by_choice"] = True
+        b = self._apply_27_bounty(seat)
+        if b:
+            r["bounty27"] = b
+        return True
+
     def _end_hand_no_showdown(self, winner: Optional[PokerPlayer]):
         """其他人都蓋牌 → 直接收池，不用亮牌。"""
         self.phase = "over"
@@ -393,9 +449,10 @@ class PokerTable:
             pot_results.append({"amount": pot["amount"], "winners": winners})
 
         self.phase = "over"
+        winner_seats = sorted({s for pr in pot_results for s in pr["winners"]})
         self.result = {
             "type": "showdown",
-            "winners": sorted({s for pr in pot_results for s in pr["winners"]}),
+            "winners": winner_seats,
             "payouts": payouts,
             "pot": sum(p["amount"] for p in pots),
             "pots": pot_results,
@@ -406,6 +463,12 @@ class PokerTable:
         }
         self.pot = 0
         self.to_act = None
+        # 攤牌時牌已亮開 → 2-7 獎金自動生效
+        for s in winner_seats:
+            b = self._apply_27_bounty(s)
+            if b:
+                self.result["bounty27"] = b
+                break
 
     # ---- 給前端的狀態 --------------------------------------------------------
     def public_state(self) -> dict:
@@ -445,6 +508,13 @@ class PokerTable:
             "stack": p.stack if p else 0,
             "can_rebuy": self.can_rebuy(seat),
             "rebuy_options": [500, 1000],
+            # 沒攤牌就收池的贏家，可以選擇秀牌（亮 2-7 才能領獎金）
+            "can_show": bool(
+                self.result and self.result.get("type") == "fold_win"
+                and not self.result.get("shown_by_choice")
+                and seat in (self.result.get("winners") or [])),
+            "bounty_27": self.bounty_27,
+            "bounty_each": int(round(self.big_blind * self.BOUNTY_27_BB)),
         }
 
 
