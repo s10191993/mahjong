@@ -114,8 +114,13 @@ async def test_restart():
     st2 = await recv_until(conns[1], {"state"})
     assert notice and st2, "應收到通知與新牌局"
     hand2 = st2["private"]["hand"]
-    assert len(hand2) == 16, f"重開後手牌應 16 張，實得 {len(hand2)}"
-    print(f"    通知：{notice['msg']}｜新手牌 {len(hand2)} 張、與原手牌不同={hand1 != hand2} ✔")
+    # 莊家由擲骰決定，可能是任何一家：莊家 17 張、其餘 16 張
+    is_dealer = st2["public"]["dealer"] == 1
+    expect = 17 if is_dealer else 16
+    assert len(hand2) == expect, \
+        f"重開後手牌應 {expect} 張（莊家={is_dealer}），實得 {len(hand2)}"
+    print(f"    通知：{notice['msg']}｜新手牌 {len(hand2)} 張"
+          f"（{'莊家' if is_dealer else '閒家'}）、與原手牌不同={hand1 != hand2} ✔")
     for w in conns:
         await w.close()
 

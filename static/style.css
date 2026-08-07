@@ -616,3 +616,62 @@ button.ghost { background: transparent; }
   #pk-actions { margin-top: 4px; gap: 6px; }
   .pk-raise, .pk-raise input[type=range] { min-width: 120px; width: 120px; }
 }
+
+/* ---------- 籌碼圖案 ---------- */
+.chips { display: flex; gap: 3px; align-items: flex-end; justify-content: center; }
+.chip-col { position: relative; width: 22px; height: 26px; }
+.chip {
+  position: absolute; left: 0; width: 22px; height: 22px; border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,.5), inset 0 -2px 0 rgba(0,0,0,.25);
+  border: 2px dashed rgba(255,255,255,.85);
+  background: #888;
+}
+.chip.c1000 { background: #d4af37; }   /* 金 */
+.chip.c500  { background: #7d3cb5; }   /* 紫 */
+.chip.c100  { background: #222;    }   /* 黑 */
+.chip.c25   { background: #1a7a37; }   /* 綠 */
+.chip.c5    { background: #c0392b; }   /* 紅 */
+.chip.c1    { background: #f0f0f0; border-color: rgba(0,0,0,.35); }
+.chip-x { position: absolute; bottom: -13px; left: 50%; transform: translateX(-50%);
+          font-size: 10px; color: rgba(255,255,255,.8); }
+.chip.c-inline { position: static; display: inline-block; width: 10px; height: 10px;
+                 border-width: 1px; margin-right: 3px; background: #d4af37;
+                 vertical-align: middle; }
+#pk-pot { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.pot-chips { margin-bottom: 2px; }
+.pot-label { font-size: 15px; color: var(--gold); }
+
+/* ---------- 下注比例 / 手動輸入 / 補碼 ---------- */
+.pk-raise { display: flex; flex-direction: column; align-items: center; gap: 5px;
+            min-width: 210px; }
+.pk-raise-row { display: flex; align-items: center; gap: 8px; }
+.pk-raise-num { width: 86px; padding: 5px 8px; font-size: 14px; text-align: center;
+                border-radius: 8px; }
+.pk-raise input[type=range] { width: 130px; }
+.pk-quick { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+.pk-mini-allin { background: #c0392b!important; border-color: #e06a5c!important;
+                 font-weight: 800; }
+.pk-rebuy { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+            justify-content: center; background: rgba(0,0,0,.45);
+            border: 1px solid var(--gold); border-radius: 12px; padding: 6px 10px; }
+.pk-rebuy-lb { font-size: 13px; color: var(--gold); }
+.pk-rebuy-btn { background: #1a7a37; padding: 8px 14px; font-size: 15px; }
+
+/* ---------- 發牌動畫 ---------- */
+@keyframes deal-in {
+  from { opacity: 0; transform: translate(0,-160px) rotate(-25deg) scale(.6); }
+  to   { opacity: 1; transform: none; }
+}
+.pcard.deal-in { animation: deal-in .38s cubic-bezier(.2,.9,.3,1.2) both; }
+@keyframes deal-flip {
+  0%   { opacity: 0; transform: rotateY(90deg) scale(.8); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: none; }
+}
+.pcard.deal-flip { animation: deal-flip .42s ease-out both; }
+
+/* 座位卡壓扁：牌與文字並排，8 人也放得下 */
+.pk-row { display: flex; align-items: center; gap: 5px; }
+.pk-txt { text-align: left; line-height: 1.25; }
+.pk-seat .pk-mini { flex-direction: row; margin-bottom: 0; }
+.pk-seat { min-width: 0; padding: 3px 7px; }

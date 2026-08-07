@@ -576,6 +576,20 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     room.start_new_hand()
                     await room.broadcast_state()
 
+            # ---- 德州：補碼 ----
+            elif t == "rebuy" and room and room.table:
+                amt = m.get("amount")
+                try:
+                    amt = int(amt)
+                except (TypeError, ValueError):
+                    amt = 0
+                if not room.table.rebuy(seat_idx, amt):
+                    await err("現在不能補碼（籌碼未低於 300、或牌局進行中）")
+                    continue
+                nm = room.seats[seat_idx].name if room.seats[seat_idx] else ""
+                await room._send_all({"t": "notice", "msg": f"{nm} 補碼 {amt}"})
+                await room.broadcast_state()
+
             # ---- 德州：下注動作 ----
             elif t == "poker_act" and room and room.table:
                 ok = room.table.act(seat_idx, m.get("action"), m.get("amount"))
@@ -587,7 +601,9 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     # 把籌碼同步回座位分數，方便大廳顯示
                     for i, s in enumerate(room.seats):
                         if s and i in room.table.players:
-                            s.score = room.table.players[i].stack - room.start_stack
+                            pp = room.table.players[i]
+                            # 淨輸贏＝目前籌碼 −（起始籌碼＋補碼總額）
+                            s.score = pp.stack - room.start_stack - pp.rebuy_total
                     await room.broadcast_lobby()
 
             # ---- 牌局動作 ----

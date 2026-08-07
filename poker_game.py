@@ -32,6 +32,7 @@ class PokerPlayer:
         self.acted = False       # 本輪是否已行動過
         self.sitting_out = False  # 沒籌碼→這手不參與
         self.last_action = ""    # 顯示用
+        self.rebuy_total = 0     # 累計補碼（算淨輸贏用）
 
     def in_hand(self) -> bool:
         return not self.folded and not self.sitting_out
@@ -68,6 +69,27 @@ class PokerTable:
 
     def remove_player(self, seat: int):
         self.players.pop(seat, None)
+
+    # ---- 補碼 ----------------------------------------------------------------
+    REBUY_THRESHOLD = 300        # 籌碼低於此值可補碼
+
+    def can_rebuy(self, seat: int) -> bool:
+        """籌碼不足且沒有正在牌局中（避免中途改變籌碼破壞彩池計算）。"""
+        p = self.players.get(seat)
+        if not p or p.stack >= self.REBUY_THRESHOLD:
+            return False
+        idle = self.phase in ("waiting", "over") or p.sitting_out or p.folded
+        return idle
+
+    def rebuy(self, seat: int, amount: int) -> bool:
+        if amount not in (500, 1000) or not self.can_rebuy(seat):
+            return False
+        p = self.players[seat]
+        p.stack += amount
+        p.rebuy_total += amount
+        p.sitting_out = False
+        self.log.append(f"{p.name} 補碼 {amount}")
+        return True
 
     def active_seats(self) -> list[int]:
         """有籌碼、可參與下一手的座位（依座位號排序）。"""
@@ -406,6 +428,7 @@ class PokerTable:
                     "sitting_out": p.sitting_out,
                     "has_cards": bool(p.hole) and not p.folded and not p.sitting_out,
                     "last_action": p.last_action,
+                    "rebuy_total": p.rebuy_total,
                 }
                 for p in sorted(self.players.values(), key=lambda x: x.seat)
             ],
@@ -420,6 +443,8 @@ class PokerTable:
             "actions": self.legal_actions(seat),
             "to_call": max(0, self.current_bet - p.bet) if p else 0,
             "stack": p.stack if p else 0,
+            "can_rebuy": self.can_rebuy(seat),
+            "rebuy_options": [500, 1000],
         }
 
 
