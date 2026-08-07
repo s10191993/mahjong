@@ -684,3 +684,19 @@ button.ghost { background: transparent; }
 .pk-show-hint { font-size: 12px; color: rgba(255,255,255,.75); }
 .pk-bounty { margin-top: 5px; padding-top: 5px; font-size: 14px; color: var(--gold);
              border-top: 1px dashed rgba(255,255,255,.25); }
+
+/* 炸彈彩池 / 遊戲結算 */
+#pk-bomb { background: #a83232!important; color: #fff!important;
+           border-color: #d96a6a!important; }
+.bomb-tag { color: #ff8b5c; font-weight: 800; }
+#pk-settle-panel .result-card { width: min(94vw, 460px); }
+#pk-settle-table { width: 100%; margin: 10px 0; border-collapse: collapse;
+                   font-size: 14px; }
+#pk-settle-table td { padding: 5px 8px; border-bottom: 1px solid rgba(255,255,255,.1);
+                      text-align: right; }
+#pk-settle-table td:first-child { text-align: left; }
+#pk-settle-table tr.hd td { color: rgba(255,255,255,.55); font-size: 12px;
+                            border-bottom: 1px solid rgba(255,255,255,.25); }
+#pk-settle-table td.pos { color: #6bffa0; font-weight: 700; }
+#pk-settle-table td.neg { color: #ff8b8b; font-weight: 700; }
+#pk-settle-table small { color: rgba(255,255,255,.5); font-size: 11px; }

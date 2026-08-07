@@ -211,6 +211,7 @@ class Room:
         pub["config"] = {"small_blind": self.small_blind, "big_blind": self.big_blind,
                          "start_stack": self.start_stack, "bounty_27": self.bounty_27}
         pub["game_type"] = "poker"
+        pub["settlement"] = self.table.settlement(self.start_stack)
         for i, seat in enumerate(self.seats):
             if seat and seat.connected and seat.ws is not None:
                 msg = {"t": "state", "game_type": "poker", "public": pub,
@@ -489,7 +490,10 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     for i, s in enumerate(room.seats):
                         if s:
                             room.table.seat_player(i, s.name)
-                    room.table.start_hand()
+                    room.table.start_hand(bomb_pot=bool(m.get("bomb_pot")))
+                    if room.table.is_bomb:
+                        await room._send_all({"t": "notice",
+                            "msg": f"💣 炸彈彩池！每家底注 {room.table.big_blind*room.table.BOMB_ANTE_BB}，直接翻牌"})
                     await room.broadcast_state()
                     await room.broadcast_lobby()
                     continue
@@ -570,7 +574,10 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     if len(room.table.active_seats()) < 2:
                         await err("剩下的人不足 2 位，請重開牌局")
                         continue
-                    room.table.start_hand()
+                    room.table.start_hand(bomb_pot=bool(m.get("bomb_pot")))
+                    if room.table.is_bomb:
+                        await room._send_all({"t": "notice",
+                            "msg": f"💣 炸彈彩池！每家底注 {room.table.big_blind*room.table.BOMB_ANTE_BB}，直接翻牌"})
                     await room.broadcast_state()
                     continue
                 if room.finished:

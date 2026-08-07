@@ -44,6 +44,8 @@ class PokerPlayer:
 class PokerTable:
     # 2-7 獎金：手拿 2 和 7 收池（攤牌或秀牌）時，每家額外付 2.5 個大盲
     BOUNTY_27_BB = 2.5
+    # 炸彈彩池：每人先下 5 個大盲當底注，不打翻牌前，直接發翻牌
+    BOMB_ANTE_BB = 5
 
     def __init__(self, small_blind: int = 10, big_blind: int = 20,
                  start_stack: int = 1000, seed: Optional[int] = None,
@@ -65,6 +67,7 @@ class PokerTable:
         self.last_aggressor: Optional[int] = None
         self.result: Optional[dict] = None
         self.hand_no = 0
+        self.is_bomb = False          # 本手是否為炸彈彩池
         self.log: list[str] = []
 
     # ---- 座位 ----------------------------------------------------------------
@@ -117,11 +120,12 @@ class PokerTable:
         return None
 
     # ---- 開一手 --------------------------------------------------------------
-    def start_hand(self) -> bool:
+    def start_hand(self, bomb_pot: bool = False) -> bool:
         live = self.active_seats()
         if len(live) < 2:
             return False
         self.hand_no += 1
+        self.is_bomb = bomb_pot
         self.deck = pk.make_deck()
         self.rng.shuffle(self.deck)
         self.board = []
@@ -144,6 +148,25 @@ class PokerTable:
         for _ in range(2):
             for s in live:
                 self.players[s].hole.append(self.deck.pop())
+
+        # 炸彈彩池：每人先下 5 個大盲底注，跳過翻牌前，直接發翻牌
+        if bomb_pot:
+            ante = self.big_blind * self.BOMB_ANTE_BB
+            for s in live:
+                self._post(s, ante, "炸彈底注")
+            # 底注算「已投入」，但翻牌這一輪的下注要從 0 重新開始
+            for p in self.players.values():
+                p.bet = 0
+                p.acted = False
+            self.current_bet = 0
+            self.min_raise = self.big_blind
+            self.last_aggressor = None
+            self.phase = "flop"
+            self._deal_board()                      # 直接發 3 張公牌
+            self.to_act = self._next_can_act(self.button)
+            if self.to_act is None:
+                self._finish_betting()
+            return True
 
         # 下盲注：兩人時莊家是小盲；三人以上莊家下家是小盲
         if len(live) == 2:
@@ -471,6 +494,18 @@ class PokerTable:
                 break
 
     # ---- 給前端的狀態 --------------------------------------------------------
+    def settlement(self, start_stack: int) -> list[dict]:
+        """遊戲結算：每人的買入、目前籌碼與淨輸贏（依淨輸贏排序）。"""
+        rows = []
+        for s, p in self.players.items():
+            buyin = start_stack + p.rebuy_total
+            rows.append({
+                "seat": s, "name": p.name, "stack": p.stack,
+                "buyin": buyin, "rebuy": p.rebuy_total,
+                "net": p.stack - buyin,
+            })
+        return sorted(rows, key=lambda x: -x["net"])
+
     def public_state(self) -> dict:
         return {
             "phase": self.phase,
@@ -483,6 +518,8 @@ class PokerTable:
             "small_blind": self.small_blind,
             "big_blind": self.big_blind,
             "hand_no": self.hand_no,
+            "is_bomb": self.is_bomb,
+            "bomb_ante": self.big_blind * self.BOMB_ANTE_BB,
             "players": [
                 {
                     "seat": p.seat, "name": p.name, "stack": p.stack,

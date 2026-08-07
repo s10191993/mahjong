@@ -334,9 +334,35 @@ function sendConfig(){
  "cfg-bounty27"].forEach(id=>
   document.getElementById(id).addEventListener("change", sendConfig));
 
-// 德州牌桌的離開／下一手
+// 德州牌桌的離開／下一手／炸彈彩池／結算
 document.getElementById("pk-leave").onclick=()=> doLeave("確定退出牌局回大廳？");
 document.getElementById("pk-next").onclick=()=> send({t:"next"});
+document.getElementById("pk-bomb").onclick=()=>{
+  const ante=(lastPublic?.big_blind||20)*5;
+  if(confirm(`下一手改打炸彈彩池？\n每家先下底注 ${ante}（5 個大盲），不打翻牌前，直接發翻牌。`))
+    send({t:"next", bomb_pot:true});
+};
+document.getElementById("pk-settle").onclick=()=> showSettlement();
+document.getElementById("pk-settle-close").onclick=()=>
+  document.getElementById("pk-settle-panel").classList.remove("show");
+
+// 遊戲結算面板
+function showSettlement(){
+  const rows=lastPublic?.settlement||[];
+  const tbl=document.getElementById("pk-settle-table");
+  tbl.innerHTML="<tr class='hd'><td>玩家</td><td>買入</td><td>目前</td><td>淨輸贏</td></tr>";
+  rows.forEach((r,i)=>{
+    const tr=document.createElement("tr");
+    const medal=["🥇","🥈","🥉"][i]||"";
+    tr.innerHTML=`<td>${medal} ${escapeHtml(r.name)}${r.seat===mySeat?"（你）":""}`+
+      `${r.rebuy?`<small> 補${r.rebuy}</small>`:""}</td>`+
+      `<td>${r.buyin.toLocaleString()}</td>`+
+      `<td>${r.stack.toLocaleString()}</td>`+
+      `<td class="${r.net>=0?'pos':'neg'}">${r.net>=0?'+':''}${r.net.toLocaleString()}</td>`;
+    tbl.appendChild(tr);
+  });
+  document.getElementById("pk-settle-panel").classList.add("show");
+}
 document.getElementById("btn-next").onclick=()=>{
   send({t:"next"});
   document.getElementById("result-overlay").classList.remove("show");

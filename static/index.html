@@ -144,7 +144,19 @@
     <div id="pk-board">
       <div id="pk-ctrl">
         <button id="pk-leave" title="退出牌局回大廳">✕ 離開</button>
+        <button id="pk-settle" title="查看目前輸贏">📊 結算</button>
         <button id="pk-next" title="開下一手">▶ 下一手</button>
+        <button id="pk-bomb" title="下一手改打炸彈彩池">💣 炸彈</button>
+      </div>
+
+      <!-- 遊戲結算面板 -->
+      <div id="pk-settle-panel" class="overlay">
+        <div class="result-card">
+          <h2>📊 遊戲結算</h2>
+          <table id="pk-settle-table"></table>
+          <p class="sub">淨輸贏 ＝ 目前籌碼 −（起始籌碼 ＋ 補碼）</p>
+          <button id="pk-settle-close" class="primary">關閉</button>
+        </div>
       </div>
       <div class="pk-info">
         <span id="pk-blinds"></span>

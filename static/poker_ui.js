@@ -85,7 +85,9 @@ function renderPoker(pub, pri, mySeat){
   document.getElementById("pk-blinds").textContent=
     `盲注 ${money(pub.small_blind)}/${money(pub.big_blind)}`;
   document.getElementById("pk-handno").textContent=`第 ${pub.hand_no} 手`;
-  document.getElementById("pk-phase").textContent=PHASE_CN[pub.phase]||pub.phase;
+  document.getElementById("pk-phase").innerHTML=
+    (pub.is_bomb ? '<span class="bomb-tag">💣 炸彈彩池</span> ' : "")+
+    (PHASE_CN[pub.phase]||pub.phase);
 
   // 底池（文字 + 籌碼圖案）
   const potBox=document.getElementById("pk-pot"); potBox.innerHTML="";
@@ -199,8 +201,11 @@ function renderPoker(pub, pri, mySeat){
 
 function renderPokerActions(pub, pri, mySeat){
   const bar=document.getElementById("pk-actions"); bar.innerHTML="";
-  const nextBtn=document.getElementById("pk-next");
-  nextBtn.style.display = (pub.phase==="over") ? "" : "none";
+  const over = pub.phase==="over";
+  const isHost = (typeof hostSeat!=="undefined") && mySeat===hostSeat;
+  document.getElementById("pk-next").style.display = over ? "" : "none";
+  // 炸彈彩池只有房主能開，且要等本手結束
+  document.getElementById("pk-bomb").style.display = (over && isHost) ? "" : "none";
 
   // 收池沒攤牌 → 可選擇秀牌（2-7 才領得到獎金）
   if(pri.can_show){
