@@ -700,3 +700,95 @@ button.ghost { background: transparent; }
 #pk-settle-table td.pos { color: #6bffa0; font-weight: 700; }
 #pk-settle-table td.neg { color: #ff8b8b; font-weight: 700; }
 #pk-settle-table small { color: rgba(255,255,255,.5); font-size: 11px; }
+
+/* ============================================================
+   麻將：牌河擺在各家面前、輪替更明顯、吃碰槓胡大字提示
+   ============================================================ */
+/* 牌河：每家打出的牌就放在自己與桌中央之間 */
+#center-pool {
+  position: absolute; inset: 0; width: auto; min-height: 0;
+  display: block; transform: none; top: 0; left: 0;
+}
+.river-box { position: absolute; padding: 3px 5px; border-radius: 8px;
+             background: rgba(0,0,0,.16); transition: box-shadow .25s; }
+.river-box.active { background: rgba(244,201,93,.14);
+                    box-shadow: 0 0 0 1px rgba(244,201,93,.5); }
+.river-box.bottom { bottom: 33%; left: 50%; transform: translateX(-50%); }
+.river-box.top    { top: 31%;    left: 50%; transform: translateX(-50%); }
+.river-box.left   { left: 15%;   top: 50%;  transform: translateY(-50%); }
+.river-box.right  { right: 15%;  top: 50%;  transform: translateY(-50%); }
+.river-box.left .discards, .river-box.right .discards {
+  grid-template-columns: repeat(3, auto); max-width: none;
+}
+.river-box.bottom .discards, .river-box.top .discards {
+  grid-template-columns: repeat(9, auto); max-width: none;
+}
+.discards { margin-top: 0; }
+/* 剛打出的那張：跳出來一下 */
+@keyframes just-discard {
+  0%   { transform: scale(1.9); filter: drop-shadow(0 0 10px var(--gold)); }
+  100% { transform: scale(1);   filter: none; }
+}
+.tile.just-discarded { animation: just-discard .45s ease-out; outline: 2px solid var(--gold); }
+/* 中央「剛打出」放大顯示 */
+.last-spot { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+             text-align: center; z-index: 4; }
+
+/* 輪到誰：座位區整塊發光 + 輪到自己時牌桌邊框發光 */
+.seat-area.is-turn .nameplate { background: var(--gold); color: #4a3500; font-weight: 800; }
+.seat-area.is-turn::after {
+  content: ""; position: absolute; inset: -8px; border-radius: 14px;
+  border: 2px solid var(--gold); box-shadow: 0 0 18px rgba(244,201,93,.75);
+  pointer-events: none; animation: seat-glow 1.1s ease-in-out infinite;
+}
+@keyframes seat-glow { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+#board.my-turn::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+  box-shadow: inset 0 0 0 4px rgba(107,255,160,.85), inset 0 0 40px rgba(107,255,160,.35);
+  animation: my-turn-glow 1.2s ease-in-out infinite;
+}
+@keyframes my-turn-glow { 0%,100% { opacity: .6; } 50% { opacity: 1; } }
+#turn-banner {
+  position: absolute; top: 44%; left: 50%; transform: translate(-50%,-50%) scale(.8);
+  background: rgba(107,255,160,.92); color: #04351b; font-weight: 900; font-size: 19px;
+  padding: 7px 22px; border-radius: 22px; z-index: 9; pointer-events: none;
+  opacity: 0; transition: opacity .25s, transform .25s; white-space: nowrap;
+  box-shadow: 0 4px 18px rgba(0,0,0,.45);
+}
+#turn-banner.show { opacity: 1; transform: translate(-50%,-50%) scale(1);
+                    animation: banner-fade 1.6s ease-out forwards; }
+@keyframes banner-fade { 0%,55% { opacity: 1; } 100% { opacity: 0; } }
+
+/* 吃／碰／槓／胡 大字 */
+#call-fx {
+  position: fixed; top: 42%; left: 50%; z-index: 65; pointer-events: none;
+  text-align: center; opacity: 0; transform: translate(-50%,-50%) scale(.4);
+}
+#call-fx.show { animation: call-pop 1.2s cubic-bezier(.2,1.4,.4,1) forwards; }
+@keyframes call-pop {
+  0%   { opacity: 0; transform: translate(-50%,-50%) scale(.4) rotate(-12deg); }
+  22%  { opacity: 1; transform: translate(-50%,-50%) scale(1.18) rotate(3deg); }
+  35%  { transform: translate(-50%,-50%) scale(1) rotate(0); }
+  78%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%,-50%) scale(1.05); }
+}
+#call-fx .call-word {
+  font-size: 76px; font-weight: 900; line-height: 1; letter-spacing: 6px;
+  -webkit-text-stroke: 3px rgba(0,0,0,.55);
+  text-shadow: 0 6px 18px rgba(0,0,0,.6);
+}
+#call-fx .call-who { font-size: 18px; font-weight: 800; color: #fff;
+                     text-shadow: 0 2px 8px rgba(0,0,0,.8); margin-top: 2px; }
+#call-fx.call-chow .call-word { color: #3fd0c0; }
+#call-fx.call-pong .call-word { color: #ffb14d; }
+#call-fx.call-kong .call-word { color: #b98cff; }
+#call-fx.call-hu   .call-word { color: #ff5a5a; font-size: 92px; }
+#call-fx.mine .call-word { -webkit-text-stroke: 3px var(--gold); }
+
+@media (max-height: 520px) {
+  .river-box.bottom { bottom: 30%; } .river-box.top { top: 29%; }
+  .river-box.left { left: 13%; } .river-box.right { right: 13%; }
+  #call-fx .call-word { font-size: 54px; }
+  #call-fx.call-hu .call-word { font-size: 66px; }
+  #turn-banner { font-size: 16px; padding: 5px 16px; }
+}

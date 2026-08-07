@@ -34,20 +34,30 @@ function playStateSounds(pub, pri){
     handNo: null,
     discards: pub.players.map(p=>p.discards.length),
     melds: pub.players.map(p=>p.melds.length),
-    meldKinds: pub.players.map(p=>p.melds.map(m=>m.kind).join(",")),
+    meldKinds: pub.players.map(p=>p.melds.map(m=>m.kind)),
     flowers: pub.players.map(p=>p.flowers.length),
     phase: pub.phase, turn: pub.turn,
     over: pub.phase==="over",
   };
   if(prev){
-    // 有人吃/碰/槓（亮牌數變多）
+    // 有人吃/碰/槓（亮牌數變多）→ 音效 + 大字提示
+    const NAME_OF={chow:"吃", pong:"碰", kong:"槓", ankong:"暗槓", addkong:"加槓"};
     for(let i=0;i<4;i++){
       if(snap.melds[i] > prev.melds[i]){
         const kinds=pub.players[i].melds;
         const k=kinds[kinds.length-1]?.kind;
         SFX.play(k==="chow"?"chow": (k==="pong"?"pong":"kong"));
-      }else if(snap.meldKinds[i]!==prev.meldKinds[i]){
-        SFX.play("kong");            // 碰→加槓（組數沒變但類型變了）
+        showCall(NAME_OF[k]||"碰", pub.players[i].name, i===mySeat,
+                 k==="chow"?"call-chow":(k==="pong"?"call-pong":"call-kong"));
+      }else if(snap.melds[i]===prev.melds[i]){
+        // 加槓：組數沒變，但某一組從「碰」變成「加槓」。
+        // 只認這個轉變，避免狀態重送／重連時整串比對而誤報。
+        const before=prev.meldKinds[i]||[], now=snap.meldKinds[i]||[];
+        const upgraded=now.some((k,idx)=> k==="addkong" && before[idx]==="pong");
+        if(upgraded){
+          SFX.play("kong");
+          showCall("加槓", pub.players[i].name, i===mySeat, "call-kong");
+        }
       }
       if(snap.flowers[i] > prev.flowers[i]) SFX.play("flower");
       // 有人打牌
@@ -65,6 +75,8 @@ function playStateSounds(pub, pri){
         else if(iWon) SFX.play("hu");
         else if(r.discarder===mySeat) SFX.play("lose");
         else SFX.play("hu");
+        const names=winners.map(w=>pub.players[w.seat]?.name||"").join("、");
+        showCall(r.self_draw?"自摸":"胡", names, iWon, "call-hu", 1800);
       }
     }
     // 輪到我出牌
@@ -205,6 +217,22 @@ function showDealerRoll(m){
   }, 90);
   clearTimeout(showDealerRoll._t);
   showDealerRoll._t=setTimeout(()=>el.classList.remove("show"), 2600);
+}
+
+// 吃／碰／槓／胡：畫面中央跳出大字（自己做的會多一圈金框）
+function showCall(word, who, isMe, cls, ms=1200){
+  let el=document.getElementById("call-fx");
+  if(!el){
+    el=document.createElement("div"); el.id="call-fx";
+    document.body.appendChild(el);
+  }
+  el.className=(cls||"")+(isMe?" mine":"");
+  el.innerHTML=`<div class="call-word">${escapeHtml(word)}</div>`+
+               `<div class="call-who">${escapeHtml(who||"")}</div>`;
+  // 重新觸發動畫
+  el.classList.remove("show"); void el.offsetWidth; el.classList.add("show");
+  clearTimeout(showCall._t);
+  showCall._t=setTimeout(()=>el.classList.remove("show"), ms);
 }
 
 // 全畫面短暫提示（例如「有玩家離開，本局中止」）
@@ -431,6 +459,27 @@ function renderTable(){
   const turnName = pub.players[pub.turn]?.name||"";
   document.getElementById("info-turn").textContent=
     pub.phase==="over" ? "本局結束" : `輪到 ${turnName}`;
+  // 輪到誰：整個牌桌加提示（輪到自己時邊框發光 + 橫幅）
+  const board=document.getElementById("board");
+  const myTurn = pub.phase!=="over" &&
+    ((pub.phase==="await_discard" && pub.turn===mySeat) ||
+     (pub.phase==="await_reaction" && (pri.reactions||[]).length>0));
+  board.classList.toggle("my-turn", myTurn);
+  let banner=document.getElementById("turn-banner");
+  if(!banner){
+    banner=document.createElement("div"); banner.id="turn-banner";
+    board.appendChild(banner);
+  }
+  banner.textContent = (pub.phase==="await_reaction" && (pri.reactions||[]).length)
+    ? "換你決定！" : "輪到你出牌";
+  banner.classList.toggle("show", myTurn);
+  // 標出目前輪到的那一家（座位區整塊發光）
+  ["top","left","right","bottom"].forEach(p=>{
+    const el=document.querySelector(`.seat-area.${p}`);
+    if(el) el.classList.toggle("is-turn",
+      pub.phase!=="over" && relPos(pub.turn)===p);
+  });
+
   // 輪到誰的指向箭頭（指向當前出牌者）
   const ptr=document.getElementById("turn-pointer");
   if(pub.phase==="over"){
@@ -539,29 +588,32 @@ function meldGroup(md, cls=""){
   return g;
 }
 
+// 每個人打出的牌，就擺在「那個人前面」（自己與桌子中央之間）
 function renderPool(pub){
   const pool=document.getElementById("center-pool");
-  const posSlot={bottom:"s",right:"e",top:"n",left:"w"};
   const lastCode = pub.last_discard? pub.last_discard[1]:null;
   const lastSeat = pub.last_discard? pub.last_discard[0]:null;
   pub.players.forEach(pl=>{
-    const slot=document.createElement("div");
-    slot.className="slot "+posSlot[relPos(pl.seat)];
+    const pos=relPos(pl.seat);
+    const box=document.createElement("div");
+    box.className="river-box "+pos+(pub.turn===pl.seat?" active":"");
     const river=document.createElement("div"); river.className="discards";
     pl.discards.forEach((c,idx)=>{
       const isLast = pl.seat===lastSeat && idx===pl.discards.length-1;
-      river.appendChild(tileEl(c,"mini"+(isLast?" last-tile":"")));
+      river.appendChild(tileEl(c,"mini"+(isLast?" last-tile just-discarded":"")));
     });
-    slot.appendChild(river);
-    pool.appendChild(slot);
+    box.appendChild(river);
+    pool.appendChild(box);
   });
-  // 中央顯示最後一張打出的牌
-  const c=document.createElement("div"); c.className="slot c";
+  // 中央放大顯示「剛打出的那一張」，看得更清楚
   if(lastCode){
-    const lbl=document.createElement("div"); lbl.className="pool-label"; lbl.textContent="最後一張";
+    const c=document.createElement("div"); c.className="last-spot";
+    const who=pub.players[lastSeat]?.name||"";
+    const lbl=document.createElement("div"); lbl.className="pool-label";
+    lbl.textContent=`${who} 打出`;
     c.appendChild(lbl); c.appendChild(tileEl(lastCode,"last-tile"));
+    pool.appendChild(c);
   }
-  pool.appendChild(c);
 }
 
 function renderMe(pub, pri){
