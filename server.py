@@ -138,8 +138,13 @@ class Room:
 
     def find_free_seat(self) -> int | None:
         for i, s in enumerate(self.seats):
-            if s is None:
-                return i
+            if s is not None:
+                continue
+            # 德州：這手還在用的座位（有投入或離開者尚未清掉）不能給新人坐，
+            # 否則會覆蓋掉投入金額，彩池就算錯了
+            if self.game_type == "poker" and self.table and self.table.seat_busy(i):
+                continue
+            return i
         return None
 
     def seat_of_token(self, token: str) -> int | None:
@@ -396,7 +401,8 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 if not r:
                     await err("找不到這個房間")
                     continue
-                if r.game is not None:
+                # 麻將固定 4 人，開局後不能加入；德州是現金桌，隨時可入座
+                if r.game_type != "poker" and r.game is not None:
                     await err("牌局已開始，無法加入")
                     continue
                 free = r.find_free_seat()
@@ -410,9 +416,17 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 r.seats[free] = seat
                 room = r
                 seat_idx = free
+                # 德州牌局進行中入座：這手先旁觀，下一手才發牌
+                mid_game = (r.game_type == "poker" and r.table is not None)
+                if mid_game:
+                    r.table.join_mid_game(free, name, r.start_stack)
                 await send({"t": "joined", "code": code, "seat": free, "token": token,
                             "game_type": r.game_type})
                 await room.broadcast_lobby()
+                if mid_game:
+                    await r._send_all({"t": "notice",
+                                       "msg": f"{name} 入座，下一手開始"})
+                    await room.broadcast_state()   # 直接把他帶進牌桌畫面
 
             # ---- 重新連線 ----
             elif t == "reconnect":
@@ -521,8 +535,15 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     continue
                 r, idx = room, seat_idx
                 r.seats[idx] = None
-                # 牌局進行中有人退出 → 中止本局，其他人回等待室（分數保留）
-                if r.game is not None:
+                # 德州：牌局不中止，離開者蓋牌讓局繼續（這手結束才真正移除）
+                if r.game_type == "poker" and r.table is not None:
+                    nm = r.table.players.get(idx).name if idx in r.table.players else ""
+                    r.table.mark_left(idx)
+                    await r._send_all({"t": "notice", "msg": f"{nm} 離開了牌桌"})
+                    if r.occupied() > 0:
+                        await r.broadcast_state()
+                # 麻將：進行中有人退出 → 中止本局，其他人回等待室（分數保留）
+                elif r.game is not None:
                     r.abandon_game()
                     await r._send_all({"t": "notice",
                                        "msg": "有玩家離開，本局中止，回到等待室"})

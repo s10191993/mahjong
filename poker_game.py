@@ -33,6 +33,7 @@ class PokerPlayer:
         self.sitting_out = False  # 沒籌碼→這手不參與
         self.last_action = ""    # 顯示用
         self.rebuy_total = 0     # 累計補碼（算淨輸贏用）
+        self.left = False        # 已離開，等這手打完才移除（避免彩池算錯）
 
     def in_hand(self) -> bool:
         return not self.folded and not self.sitting_out
@@ -78,6 +79,52 @@ class PokerTable:
     def remove_player(self, seat: int):
         self.players.pop(seat, None)
 
+    # ---- 中途加入 / 離開 -------------------------------------------------------
+    def in_active_hand(self) -> bool:
+        return self.phase in STREETS
+
+    def join_mid_game(self, seat: int, name: str, stack: int):
+        """中途入座：這手先旁觀，下一手才發牌。"""
+        self.seat_player(seat, name, stack)
+        p = self.players[seat]
+        p.sitting_out = True          # 本手不參與
+        p.last_action = "等下一手"
+        self.log.append(f"{name} 入座（下一手開始）")
+
+    def seat_busy(self, seat: int) -> bool:
+        """這個座位是否還被本手牌局佔用（有投入或還沒被清掉的離開者）。
+        新玩家不能坐進來，否則會把投入金額覆蓋掉、彩池就算錯了。"""
+        p = self.players.get(seat)
+        if not p:
+            return False
+        return self.in_active_hand() and (p.invested > 0 or p.left)
+
+    def mark_left(self, seat: int):
+        """玩家離開：牌局中先蓋牌讓局繼續，等這手結束再真正移除。"""
+        p = self.players.get(seat)
+        if not p:
+            return
+        if self.in_active_hand() and p.in_hand():
+            if self.to_act == seat and p.can_act():
+                self.act(seat, "fold")          # 正在等他 → 蓋牌換人，避免卡住
+            else:
+                # 不是當前行動者：只把他蓋掉，不動行動順序
+                #（呼叫 _advance 會把行動權往後推，弄亂還沒行動的人）
+                p.folded = True
+                p.acted = True
+                alive = [q for q in self.players.values() if q.in_hand()]
+                if len(alive) <= 1:
+                    self._end_hand_no_showdown(alive[0] if alive else None)
+        p.left = True
+        p.sitting_out = True
+        p.last_action = "已離開"
+        if not self.in_active_hand():
+            self.remove_player(seat)
+
+    def _purge_left(self):
+        for s in [s for s, p in self.players.items() if p.left]:
+            self.remove_player(s)
+
     # ---- 補碼 ----------------------------------------------------------------
     REBUY_THRESHOLD = 300        # 籌碼低於此值可補碼
 
@@ -121,6 +168,7 @@ class PokerTable:
 
     # ---- 開一手 --------------------------------------------------------------
     def start_hand(self, bomb_pot: bool = False) -> bool:
+        self._purge_left()            # 上一手離開的人，現在才真正移除
         live = self.active_seats()
         if len(live) < 2:
             return False
