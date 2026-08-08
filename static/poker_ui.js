@@ -124,6 +124,7 @@ function renderPoker(pub, pri, mySeat){
     if(!p.name || p.seat===mySeat) return;
     const el=document.createElement("div");
     el.className="pk-seat"+(p.folded?" folded":"")+(pub.to_act===p.seat?" acting":"");
+    el.setAttribute("data-seat-mark", p.seat);   // 給語音「誰在講話」用
     const pp=pos[p.seat]||{x:50,y:10};
     el.style.left=pp.x+"%"; el.style.top=pp.y+"%";
     const cards=p.has_cards

@@ -187,6 +187,7 @@ function handle(m){
       break;
     case "room":
       hostSeat = m.host_seat ?? 0;
+      if(m.voice_peers){ Voice.setSeat(mySeat); Voice.syncPeers(m.voice_peers); }
       renderWaiting(m);
       // 牌局被中止（有人離開／尚未開始）→ 從牌桌回到等待室
       if(!m.started && document.getElementById("table").classList.contains("active")){
@@ -200,6 +201,13 @@ function handle(m){
       break;
     case "notice":
       showNotice(m.msg);
+      break;
+    case "voice_peers":
+      Voice.setSeat(mySeat);
+      Voice.syncPeers(m.peers);
+      break;
+    case "rtc":
+      Voice.signal(m);
       break;
     case "dealer_roll":
       showDealerRoll(m);
@@ -391,6 +399,58 @@ fsBtn.onclick=()=>{
 document.addEventListener("fullscreenchange",()=>{
   fsBtn.textContent = document.fullscreenElement ? "⛶" : "⛶";
 });
+
+// ---- 語音聊天 ----
+Voice.init({
+  send,
+  onUpdate: ()=>{ syncVoiceBtns(); paintSpeaking(); },
+});
+function syncVoiceBtns(){
+  const label = !Voice.enabled ? "🎤 語音"
+              : (Voice.muted ? "🔇 已閉麥" : "🎙 通話中");
+  ["btn-voice","pk-voice"].forEach(id=>{
+    const b=document.getElementById(id);
+    if(!b) return;
+    b.textContent=label;
+    b.classList.toggle("voice-on", Voice.enabled && !Voice.muted);
+    b.classList.toggle("voice-muted", Voice.enabled && Voice.muted);
+  });
+}
+// 在名牌／座位卡上標出「誰正在講話」
+function paintSpeaking(){
+  document.querySelectorAll("[data-seat-mark]").forEach(el=>{
+    const s=+el.getAttribute("data-seat-mark");
+    el.classList.toggle("speaking", Voice.enabled && Voice.isSpeaking(s));
+  });
+}
+setInterval(paintSpeaking, 200);
+
+async function toggleVoice(){
+  if(!Voice.supported){
+    showNotice("這個瀏覽器不支援語音聊天");
+    return;
+  }
+  if(!Voice.enabled){
+    try{
+      await Voice.enable();
+      Voice.setSeat(mySeat);
+      showNotice("語音已開啟，再按一次可閉麥");
+    }catch(e){
+      showNotice("無法使用麥克風：請允許權限（且需 https）");
+      return;
+    }
+  }else{
+    // 已開 → 第一次按閉麥，閉麥狀態再按就完全關閉
+    if(!Voice.muted) Voice.toggleMute();
+    else Voice.disable();
+  }
+  syncVoiceBtns();
+}
+["btn-voice","pk-voice"].forEach(id=>{
+  const b=document.getElementById(id);
+  if(b) b.onclick=toggleVoice;
+});
+syncVoiceBtns();
 
 // 音效開關
 const sndBtn=document.getElementById("btn-sound");
@@ -593,6 +653,7 @@ function nameplate(pl, pub){
   const off = (pub.connected && pub.connected[pl.seat]===false)
     ? '<span class="tag-off">斷線</span>' : "";
   const afk = (pub.afk && pub.afk[pl.seat]) ? '<span class="tag-afk">暫離</span>' : "";
+  np.setAttribute("data-seat-mark", pl.seat);   // 給語音「誰在講話」用
   np.innerHTML=`${wind}${escapeHtml(pl.name)}${dealer}`+
                `<span class="sc">${pl.score}</span>${off}${afk}`;
   if(isTurn) np.appendChild(timerEl());   // 輪到他 → 名牌上顯示倒數

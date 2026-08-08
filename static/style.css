@@ -833,3 +833,19 @@ button.ghost { background: transparent; }
 .tag-off { background: #a02c2c; color: #fff; }
 .tag-afk { background: #7a6a2a; color: #ffe9a8; }
 .pk-seat .tag-off, .pk-seat .tag-afk { margin-left: 0; margin-top: 2px; }
+
+/* ---------- 語音聊天 ---------- */
+#btn-voice.voice-on, #pk-voice.voice-on {
+  background: #1a7a37 !important; border-color: #4bd97a !important; color: #fff !important; }
+#btn-voice.voice-muted, #pk-voice.voice-muted {
+  background: #7a2a2a !important; border-color: #d97a7a !important; color: #fff !important; }
+/* 誰正在講話：外框發光 + 麥克風圖示 */
+[data-seat-mark].speaking {
+  box-shadow: 0 0 0 2px #4bd97a, 0 0 14px rgba(75,217,122,.8) !important;
+}
+[data-seat-mark].speaking::before {
+  content: "🎙"; position: absolute; top: -9px; right: -6px; font-size: 13px;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.8)); animation: mic-pulse .6s ease-in-out infinite alternate;
+}
+@keyframes mic-pulse { from { transform: scale(1); } to { transform: scale(1.25); } }
+.nameplate { position: relative; }

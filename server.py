@@ -71,6 +71,7 @@ class Seat:
         self.connected = False
         self.afk_count = 0      # 連續逾時次數
         self.afk = False        # 暫離：倒數縮短，不讓整桌一直等
+        self.voice = False      # 是否已開語音（給其他人知道要不要跟他連線）
 
 
 class Room:
@@ -162,6 +163,11 @@ class Room:
         if self.deadline is None:
             return None
         return max(0, int((self.deadline - time.time()) * 1000))
+
+    def voice_peers(self) -> list[int]:
+        """目前有開語音而且還連著的座位。"""
+        return [i for i, s in enumerate(self.seats)
+                if s and s.connected and s.voice]
 
     def clear_afk(self, seat: int):
         """玩家自己動了 → 不再算暫離。"""
@@ -300,6 +306,7 @@ class Room:
 
     async def broadcast_lobby(self):
         payload = self.lobby_payload()
+        payload["voice_peers"] = self.voice_peers()
         await self._send_all(payload)
 
     async def broadcast_state(self):
@@ -742,6 +749,33 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     room.start_new_hand()
                     await room.broadcast_state()
 
+            # ---- 語音：宣告自己開/關語音 ----
+            elif t == "voice_state" and room and seat_idx is not None:
+                st = room.seats[seat_idx]
+                if st:
+                    st.voice = bool(m.get("on"))
+                await room._send_all({"t": "voice_peers",
+                                      "peers": room.voice_peers()})
+
+            # ---- 語音：WebRTC 信令轉發（offer / answer / ice）----
+            # 音訊本身走點對點，伺服器只幫忙牽線，不碰任何語音資料。
+            elif t == "rtc" and room and seat_idx is not None:
+                try:
+                    to = int(m.get("to"))
+                except (TypeError, ValueError):
+                    continue
+                if not (0 <= to < len(room.seats)):
+                    continue
+                target = room.seats[to]
+                if not target or not target.connected or target.ws is None:
+                    continue
+                await room._safe_send(target.ws, {
+                    "t": "rtc",
+                    "from": seat_idx,          # 由伺服器填，不信任前端
+                    "kind": m.get("kind"),
+                    "data": m.get("data"),
+                })
+
             # ---- 德州：秀牌（沒攤牌就收池的贏家可選擇亮牌，2-7 才領得到獎金）----
             elif t == "poker_show" and room and room.table:
                 if not room.table.show_cards(seat_idx):
@@ -816,8 +850,11 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
         if room and seat_idx is not None and room.seats[seat_idx]:
             room.seats[seat_idx].connected = False
             room.seats[seat_idx].ws = None
+            room.seats[seat_idx].voice = False      # 斷線就離開語音
             try:
                 await room.broadcast_lobby()
+                await room._send_all({"t": "voice_peers",
+                                      "peers": room.voice_peers()})
             except Exception:
                 pass
     return ws
