@@ -691,11 +691,20 @@ async def index(request):
     return web.FileResponse(os.path.join(STATIC, "index.html"))
 
 
+IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".ico", ".gif")
+
+
 @web.middleware
 async def no_cache(request, handler):
     resp = await handler(request)
-    # 避免瀏覽器拿到舊的前端檔（更新後朋友都能拿到最新版）
-    if request.path == "/" or request.path.startswith("/static/"):
+    path = request.path
+    if path.startswith("/static/") and path.lower().endswith(IMG_EXTS):
+        # 牌面圖／圖示：一定要讓瀏覽器快取。
+        # 牌桌每次重繪都會重建幾十個 <img>，不快取的話每次出牌都重新下載，
+        # 打久了就會愈來愈卡。
+        resp.headers["Cache-Control"] = "public, max-age=604800"
+    elif path == "/" or path.startswith("/static/"):
+        # HTML / JS / CSS 不快取，更新後朋友一定拿到最新版
         resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resp
 

@@ -40,7 +40,7 @@ def has(names, *want):
 ligu = ["m1","m1","p2","p2","s3","s3","we","we","ws","ws","dz","dz","df","df","db","db","db"]
 tot, names, d = score(ligu, self_draw=True)
 assert "哩咕哩咕(全對)" in names, names
-assert has(names, "自摸","門清","門清自摸"), names
+assert has(names, "自摸","門清","不求人"), names
 print("1 哩咕哩咕：", tot, d)
 
 # 2) 大不搭（1-4-7 間距全=3）自摸門清
@@ -129,5 +129,35 @@ assert t_dealer_deal == t_other_deal + 1, (t_dealer_deal, t_other_deal)
 t, n = dealer_case(winner=2, discarder=None, self_draw=True)   # 閒家自摸
 assert "莊家" in n, n
 print(f"10 莊家台：莊家放槍 {t_dealer_deal} 台 > 閒家放槍 {t_other_deal} 台 ✔")
+
+# 11) 平胡：要「無自摸、無花」才算
+ph_hand = ["m1","m2","m3","m4","m5","m6","p1","p2","p3","s1","s2","s3","s7","s8","p9","p9","s6"]
+def ping_case(self_draw, flowers):
+    g = mkgame(dealer=0)
+    p = g.players[1]
+    p.hand = mj.sort_hand(list(ph_hand)); p.melds = []; p.flowers = list(flowers)
+    g.any_claim, g.discard_count = True, 8
+    r = score_hand(g, 1, "s6", self_draw, {"win_type": "normal",
+                                           "discarder": None if self_draw else 2})
+    return [n for n, _ in r["detail"]]
+
+assert "平胡" in ping_case(False, []), "食胡且無花 → 應有平胡"
+assert "平胡" not in ping_case(True, []), "自摸 → 不該有平胡"
+assert "平胡" not in ping_case(False, ["f1"]), "有花 → 不該有平胡"
+print("11 平胡：食胡無花才算，自摸／有花都不算 ✔")
+
+# 12) 門清一摸三 = 門清1 + 自摸1 + 不求人1
+mq_hand = ["m1","m2","m3","m4","m5","m6","m7","m8","m9","p1","p2","p3","s1","s2","s3","dz","dz"]
+g = mkgame(dealer=0)
+p = g.players[1]
+p.hand = mj.sort_hand(list(mq_hand)); p.melds = []; p.flowers = []
+g.any_claim, g.discard_count = True, 8
+r = score_hand(g, 1, "s3", True, {"win_type": "normal", "discarder": None})
+d = dict(r["detail"])
+for k in ("門清", "自摸", "不求人"):
+    assert k in d, f"門清自摸應含「{k}」，實得 {r['detail']}"
+assert d["門清"] + d["自摸"] + d["不求人"] == 3, r["detail"]
+assert "門清自摸" not in d, "舊名稱不該再出現"
+print("12 門清一摸三：門清1＋自摸1＋不求人1 = 3 台 ✔")
 
 print("\n計分專項測試全部通過 ✔")

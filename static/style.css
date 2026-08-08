@@ -792,3 +792,15 @@ button.ghost { background: transparent; }
   #call-fx.call-hu .call-word { font-size: 66px; }
   #turn-banner { font-size: 16px; padding: 5px 16px; }
 }
+
+/* 「剛打出哪張」移到資訊列，中央整塊留給四家牌河 */
+#info-last { display: inline-flex; align-items: center; gap: 5px;
+             color: #fff !important; }
+#info-last .tile { box-shadow: 0 0 0 2px var(--gold); }
+/* 上下家的河用單排，才塞得進座位與中央之間的空隙 */
+.river-box.bottom .discards, .river-box.top .discards {
+  grid-template-columns: repeat(20, auto);
+}
+.river-box.left .discards, .river-box.right .discards {
+  grid-template-columns: repeat(3, auto);
+}

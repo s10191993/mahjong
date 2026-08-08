@@ -544,7 +544,7 @@ class Game:
 # 台數表（可自行調整成你家的規則）
 # ---------------------------------------------------------------------------
 TAI = {
-    "自摸": 1, "門清": 1, "門清自摸": 1, "莊家": 1, "連拉": 2,
+    "自摸": 1, "門清": 1, "不求人": 1, "莊家": 1, "連拉": 2,
     "圈風": 1, "門風": 1, "三元": 1,
     "平胡": 2, "對對胡": 4, "混一色": 4, "清一色": 8, "字一色": 16,
     "小三元": 4, "大三元": 8, "小四喜": 8, "大四喜": 16,
@@ -653,8 +653,9 @@ def _structure_tai(game: Game, seat: int, concealed: list[str],
         # 全求人：五組全靠別人 + 食胡
         if len(exposed) == 5 and not self_draw and all(m.from_seat is not None for m in exposed):
             a("全求人", TAI["全求人"])
-        # 平胡：全順、將非字牌、兩面聽
-        if chows == 5 and pair_kind not in mj.HONORS and liang_mian:
+        # 平胡：全順、將非字牌、兩面聽，且要「無自摸、無花」
+        if (chows == 5 and pair_kind not in mj.HONORS and liang_mian
+                and not self_draw and not game.players[seat].flowers):
             a("平胡", TAI["平胡"])
         # 獨聽
         if dan_ting:
@@ -692,7 +693,7 @@ def score_hand(game: Game, seat: int, win_tile: str, self_draw: bool,
     if p.is_menqing():
         add("門清", TAI["門清"])
         if self_draw:
-            add("門清自摸", TAI["門清自摸"])
+            add("不求人", TAI["不求人"])   # 門清一摸三＝門清1＋自摸1＋不求人1
     # 莊家台：只要莊家有關就算 —— 莊家胡牌、莊家放槍、或別人自摸（莊家也要付）。
     # 唯一不算的情況是「閒家放槍給閒家」（莊家沒付錢也沒胡）。
     _discarder = ctx.get("discarder")

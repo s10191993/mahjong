@@ -98,10 +98,16 @@ function playStateSounds(pub, pri){
 function scheduleRelayout(){
   [0, 150, 400, 900].forEach(d=> setTimeout(()=>{ if(lastPublic) renderTable(); }, d));
 }
+// 轉向／網址列收合會連發很多次 resize，做防抖避免狂重繪拖慢畫面
+let _relayoutT=null;
+function relayoutSoon(){
+  clearTimeout(_relayoutT);
+  _relayoutT=setTimeout(()=>{ if(lastPublic && gameType!=="poker") renderTable(); }, 120);
+}
 ["resize","orientationchange"].forEach(ev=>
-  window.addEventListener(ev, ()=>{ if(lastPublic) scheduleRelayout(); }));
+  window.addEventListener(ev, relayoutSoon));
 if(window.visualViewport){
-  window.visualViewport.addEventListener("resize", ()=>{ if(lastPublic) renderTable(); });
+  window.visualViewport.addEventListener("resize", relayoutSoon);
 }
 
 // ---- 畫面切換 ----
@@ -519,6 +525,8 @@ function renderTable(){
   renderPool(pub);
   // 自己
   renderMe(pub, pri);
+  // 牌河定位要在所有座位都畫完之後（要量到含亮牌/手牌的真實範圍）
+  layoutRivers();
   // 動作列
   renderActions(pub, pri);
   // 結算
@@ -588,6 +596,31 @@ function meldGroup(md, cls=""){
   return g;
 }
 
+// 牌河定位：依「實際量到的座位範圍」把牌河貼在該家外側，
+// 不用寫死百分比 —— 座位會因為吃碰槓與花牌而變寬，寫死就會互相遮擋。
+function layoutRivers(){
+  const board=document.getElementById("board");
+  if(!board) return;
+  const br=board.getBoundingClientRect();
+  const GAP=8;
+  const seatRect=(p)=>{
+    const e=document.querySelector(`.seat-area.${p}`);
+    return e ? e.getBoundingClientRect() : null;
+  };
+  const set=(pos, styles)=>{
+    const el=document.querySelector(`.river-box.${pos}`);
+    if(el) Object.assign(el.style, styles);
+  };
+  const t=seatRect("top"), b=seatRect("bottom"),
+        l=seatRect("left"), r=seatRect("right");
+  // 上下：貼在座位內側（靠桌中央那一邊）
+  if(t) set("top",    {top:(t.bottom-br.top+GAP)+"px", bottom:"auto"});
+  if(b) set("bottom", {bottom:(br.bottom-b.top+GAP)+"px", top:"auto"});
+  // 左右：貼在座位內側，並限制寬度避免壓到中央
+  if(l) set("left",   {left:(l.right-br.left+GAP)+"px", right:"auto"});
+  if(r) set("right",  {right:(br.right-r.left+GAP)+"px", left:"auto"});
+}
+
 // 每個人打出的牌，就擺在「那個人前面」（自己與桌子中央之間）
 function renderPool(pub){
   const pool=document.getElementById("center-pool");
@@ -605,14 +638,18 @@ function renderPool(pub){
     box.appendChild(river);
     pool.appendChild(box);
   });
-  // 中央放大顯示「剛打出的那一張」，看得更清楚
-  if(lastCode){
-    const c=document.createElement("div"); c.className="last-spot";
-    const who=pub.players[lastSeat]?.name||"";
-    const lbl=document.createElement("div"); lbl.className="pool-label";
-    lbl.textContent=`${who} 打出`;
-    c.appendChild(lbl); c.appendChild(tileEl(lastCode,"last-tile"));
-    pool.appendChild(c);
+  // 「剛打出哪張」放到上方資訊列，中央整塊留給四家的牌河，才不會互相擋
+  const info=document.getElementById("info-last");
+  if(info){
+    if(lastCode){
+      info.innerHTML="";
+      const who=document.createElement("span");
+      who.textContent=(pub.players[lastSeat]?.name||"")+" 打出";
+      info.append(who, tileEl(lastCode,"mini last-tile"));
+      info.style.display="";
+    }else{
+      info.style.display="none";
+    }
   }
 }
 
