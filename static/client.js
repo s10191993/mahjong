@@ -6,6 +6,49 @@ let ws=null, mySeat=null, roomCode=null, token=null;
 let lastPublic=null, lastPrivate=null;
 // 音效用：記住上一次的牌局狀態，用來偵測「發生了什麼事」
 let sfxPrev=null, curHandNo=null, hostSeat=0;
+
+// ---- 行動倒數 ----
+// 伺服器只在狀態更新時給「剩餘毫秒」，前端自己往下數，才不用一直問伺服器
+let deadlineAt=null, turnTotalMs=20000, lastTickSec=null;
+function setDeadline(ms, totalSec){
+  deadlineAt = (ms===null || ms===undefined) ? null : Date.now()+ms;
+  if(totalSec) turnTotalMs = totalSec*1000;
+  if(deadlineAt===null) lastTickSec=null;
+}
+function updateTimerUI(){
+  const els=document.querySelectorAll(".turn-timer");
+  if(deadlineAt===null){ els.forEach(e=>e.style.display="none"); return; }
+  const left=Math.max(0, deadlineAt-Date.now());
+  const pct=Math.max(0, Math.min(1, left/turnTotalMs));
+  const secs=Math.ceil(left/1000);
+  const urgent=left<=5000;
+  els.forEach(e=>{
+    e.style.display="";
+    e.classList.toggle("urgent", urgent);
+    const bar=e.querySelector(".tt-bar"); if(bar) bar.style.width=(pct*100)+"%";
+    const num=e.querySelector(".tt-num"); if(num) num.textContent=secs;
+  });
+  // 只在「輪到我」且剩 5 秒內時，每秒嗶一聲提醒
+  if(urgent && secs>0 && secs!==lastTickSec && isMyTurnNow()){
+    lastTickSec=secs;
+    SFX.play("draw_tile");
+  }
+}
+function isMyTurnNow(){
+  const pub=lastPublic, pri=lastPrivate;
+  if(!pub) return false;
+  if(gameType==="poker") return pub.to_act===mySeat;
+  return (pub.phase==="await_discard" && pub.turn===mySeat) ||
+         (pub.phase==="await_reaction" && (pri?.reactions||[]).length>0);
+}
+setInterval(updateTimerUI, 200);
+
+function timerEl(){
+  const d=document.createElement("div");
+  d.className="turn-timer";
+  d.innerHTML='<span class="tt-num"></span><span class="tt-track"><span class="tt-bar"></span></span>';
+  return d;
+}
 let gameType="mahjong";          // "mahjong" | "poker"
 let pokerPrev=null;
 
@@ -164,6 +207,7 @@ function handle(m){
     case "state":
       if(m.game_type==="poker" || gameType==="poker"){
         lastPublic=m.public; lastPrivate=m.private;
+        setDeadline(m.public.deadline_ms, m.public.turn_seconds);
         show("poker");
         renderPoker(m.public, m.private, mySeat);
         playPokerSounds(m.public);
@@ -171,6 +215,7 @@ function handle(m){
       }
       if(m.hand_no!==undefined && m.hand_no!==curHandNo){ curHandNo=m.hand_no; sfxPrev=null; }
       lastPublic=m.public; lastPrivate=m.private;
+      setDeadline(m.public.deadline_ms, m.public.turn_seconds);
       {
         const first = !document.getElementById("table").classList.contains("active");
         show("table");
@@ -362,10 +407,11 @@ function sendConfig(){
     small_blind: parseInt(document.getElementById("cfg-sb").value)||10,
     big_blind: parseInt(document.getElementById("cfg-bb").value)||20,
     start_stack: parseInt(document.getElementById("cfg-stack").value)||1000,
-    bounty_27: document.getElementById("cfg-bounty27").checked});
+    bounty_27: document.getElementById("cfg-bounty27").checked,
+    turn_seconds: parseInt(document.getElementById("cfg-turn").value)});
 }
 ["cfg-base","cfg-tai","cfg-rounds","cfg-dice","cfg-sb","cfg-bb","cfg-stack",
- "cfg-bounty27"].forEach(id=>
+ "cfg-bounty27","cfg-turn"].forEach(id=>
   document.getElementById(id).addEventListener("change", sendConfig));
 
 // 德州牌桌的離開／下一手／炸彈彩池／結算
@@ -434,8 +480,9 @@ function renderWaiting(m){
   document.getElementById("cfg-bb").value = cfg.big_blind ?? 20;
   document.getElementById("cfg-stack").value = cfg.start_stack ?? 1000;
   document.getElementById("cfg-bounty27").checked = cfg.bounty_27 !== false;
+  document.getElementById("cfg-turn").value = String(cfg.turn_seconds ?? 20);
   ["cfg-base","cfg-tai","cfg-rounds","cfg-dice",
-   "cfg-sb","cfg-bb","cfg-stack","cfg-bounty27"].forEach(id=>
+   "cfg-sb","cfg-bb","cfg-stack","cfg-bounty27","cfg-turn"].forEach(id=>
     document.getElementById(id).disabled = !isHost);
   document.getElementById("cfg-hint").textContent =
     isHost ? "（房主可調整；開局後鎖定）" : "由房主設定";
@@ -476,8 +523,9 @@ function renderTable(){
     banner=document.createElement("div"); banner.id="turn-banner";
     board.appendChild(banner);
   }
-  banner.textContent = (pub.phase==="await_reaction" && (pri.reactions||[]).length)
+  banner.innerHTML = (pub.phase==="await_reaction" && (pri.reactions||[]).length)
     ? "換你決定！" : "輪到你出牌";
+  if(myTurn) banner.appendChild(timerEl());   // 自己的倒數放在橫幅上
   banner.classList.toggle("show", myTurn);
   // 標出目前輪到的那一家（座位區整塊發光）
   ["top","left","right","bottom"].forEach(p=>{
@@ -527,6 +575,7 @@ function renderTable(){
   renderMe(pub, pri);
   // 牌河定位要在所有座位都畫完之後（要量到含亮牌/手牌的真實範圍）
   layoutRivers();
+  updateTimerUI();     // 重繪會重建倒數元件，立刻填值才不會閃一下空白
   // 動作列
   renderActions(pub, pri);
   // 結算
@@ -536,10 +585,17 @@ function renderTable(){
 
 function nameplate(pl, pub){
   const np=document.createElement("div");
-  np.className="nameplate"+(pub.turn===pl.seat && pub.phase!=="over"?" active-turn":"");
+  const isTurn = pub.turn===pl.seat && pub.phase!=="over";
+  np.className="nameplate"+(isTurn?" active-turn":"");
   const wind = pl.wind? `<span class="wind">${WIND_CN[pl.wind]}</span>`:"";
   const dealer = pl.seat===pub.dealer ? "🀄":"";
-  np.innerHTML=`${wind}${escapeHtml(pl.name)}${dealer}<span class="sc">${pl.score}</span>`;
+  // 斷線／暫離要讓其他人看得到，才知道在等誰
+  const off = (pub.connected && pub.connected[pl.seat]===false)
+    ? '<span class="tag-off">斷線</span>' : "";
+  const afk = (pub.afk && pub.afk[pl.seat]) ? '<span class="tag-afk">暫離</span>' : "";
+  np.innerHTML=`${wind}${escapeHtml(pl.name)}${dealer}`+
+               `<span class="sc">${pl.score}</span>${off}${afk}`;
+  if(isTurn) np.appendChild(timerEl());   // 輪到他 → 名牌上顯示倒數
   return np;
 }
 

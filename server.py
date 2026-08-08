@@ -31,6 +31,9 @@ DEFAULT_TAI = 20        # 預設每台
 DEFAULT_SB = 10         # 德州：預設小盲
 DEFAULT_BB = 20         # 德州：預設大盲
 DEFAULT_STACK = 1000    # 德州：預設起始籌碼
+DEFAULT_TURN_SECONDS = 20   # 每個行動的倒數秒數（0 = 關閉）
+AFK_TURN_SECONDS = 3        # 已判定暫離者的倒數（縮短，別讓整桌等）
+AFK_AFTER = 2               # 連續逾時幾次就算暫離
 rooms: dict[str, "Room"] = {}
 
 
@@ -66,6 +69,8 @@ class Seat:
         self.ws: web.WebSocketResponse | None = None
         self.score = 0
         self.connected = False
+        self.afk_count = 0      # 連續逾時次數
+        self.afk = False        # 暫離：倒數縮短，不讓整桌一直等
 
 
 class Room:
@@ -104,9 +109,123 @@ class Room:
         self.dice_patterns: list[str] = []
         self.rng = random.Random()
         self.last_active = time.time()      # 給房間清理用
+        # ---- 行動倒數（避免有人離開整桌卡死）----
+        self.turn_seconds = DEFAULT_TURN_SECONDS   # 0 = 關閉倒數
+        self.deadline: float | None = None         # 這個行動的截止時間
+        self.deadline_key: str | None = None       # 用來判斷「還是不是同一個等待狀態」
 
     def touch(self):
         self.last_active = time.time()
+
+    # ---- 行動倒數 ------------------------------------------------------------
+    def waiting_key(self) -> tuple[str, list[int]] | None:
+        """
+        目前在等誰行動。回傳 (狀態指紋, 等待中的座位清單)；沒在等人則 None。
+        指紋只要局面一變就會不同，用來判斷倒數該不該重新計時。
+        """
+        if self.game_type == "poker":
+            t = self.table
+            if not t or t.phase not in POKER_STREETS or t.to_act is None:
+                return None
+            return (f"p{t.hand_no}:{t.phase}:{t.to_act}:{t.pot}:{t.current_bet}",
+                    [t.to_act])
+        g = self.game
+        if not g:
+            return None
+        if g.phase == "await_discard":
+            melds = sum(len(p.melds) for p in g.players)
+            return (f"d{self.hand_no}:{g.turn}:{g.discard_count}:{len(g.wall)}:{melds}",
+                    [g.turn])
+        if g.phase == "await_reaction":
+            waiting = [s for s in g.pending if s not in g.responses]
+            if not waiting:
+                return None
+            return (f"r{self.hand_no}:{g.discard_count}", waiting)
+        return None
+
+    def refresh_deadline(self):
+        """局面變了就重新計時；沒在等人就清掉倒數。"""
+        wk = self.waiting_key()
+        if not wk or not self.turn_seconds:
+            self.deadline = self.deadline_key = None
+            return
+        key, seats = wk
+        if key != self.deadline_key:
+            self.deadline_key = key
+            # 只要有一位是暫離狀態，就用短倒數
+            afk = any(self.seats[s] and self.seats[s].afk for s in seats
+                      if 0 <= s < len(self.seats))
+            secs = AFK_TURN_SECONDS if afk else self.turn_seconds
+            self.deadline = time.time() + secs
+
+    def deadline_ms(self) -> int | None:
+        if self.deadline is None:
+            return None
+        return max(0, int((self.deadline - time.time()) * 1000))
+
+    def clear_afk(self, seat: int):
+        """玩家自己動了 → 不再算暫離。"""
+        s = self.seats[seat] if 0 <= seat < len(self.seats) else None
+        if s and (s.afk or s.afk_count):
+            s.afk = False
+            s.afk_count = 0
+
+    def _mark_timeout(self, seat: int) -> bool:
+        """記一次逾時，回傳是否「剛好變成暫離」。"""
+        s = self.seats[seat] if 0 <= seat < len(self.seats) else None
+        if not s:
+            return False
+        s.afk_count += 1
+        if not s.afk and s.afk_count >= AFK_AFTER:
+            s.afk = True
+            return True
+        return False
+
+    def apply_timeout(self) -> list[str]:
+        """時間到 → 幫他做最安全的動作。回傳要廣播的訊息。"""
+        msgs: list[str] = []
+        wk = self.waiting_key()
+        if not wk:
+            return msgs
+        _, seats = wk
+
+        def name_of(i):
+            return self.seats[i].name if 0 <= i < len(self.seats) and self.seats[i] else "玩家"
+
+        if self.game_type == "poker":
+            t, seat = self.table, seats[0]
+            acts = t.legal_actions(seat)
+            if "check" in acts:
+                t.act(seat, "check")
+                msgs.append(f"⏱ {name_of(seat)} 逾時，自動過牌")
+            else:
+                t.act(seat, "fold")
+                msgs.append(f"⏱ {name_of(seat)} 逾時，自動蓋牌")
+            if self._mark_timeout(seat):
+                msgs.append(f"{name_of(seat)} 連續逾時，設為暫離")
+            return msgs
+
+        g = self.game
+        if g.phase == "await_discard":
+            seat = seats[0]
+            p = g.players[seat]
+            # 打掉剛摸的那張最安全（等同「摸什麼打什麼」）
+            tile = g.last_draw if (g.last_draw and g.last_draw in p.hand) else \
+                (p.hand[-1] if p.hand else None)
+            if tile:
+                g.discard(seat, tile)
+                msgs.append(f"⏱ {name_of(seat)} 逾時，自動打出 {mj.name_of(tile)}")
+            if self._mark_timeout(seat):
+                msgs.append(f"{name_of(seat)} 連續逾時，設為暫離")
+        elif g.phase == "await_reaction":
+            for s in list(seats):
+                if g.phase != "await_reaction" or s in g.responses:
+                    continue          # 中途被別人的胡/碰結算掉了
+                g.claim(s, "pass")
+                if self._mark_timeout(s):
+                    msgs.append(f"{name_of(s)} 連續逾時，設為暫離")
+            msgs.append("⏱ 逾時，未回應者自動過")
+        return msgs
 
     def anyone_connected(self) -> bool:
         return any(s and s.connected for s in self.seats)
@@ -167,7 +286,8 @@ class Room:
             "config": {"base": self.base, "tai_value": self.tai_value,
                        "dice_rule": self.dice_rule, "rounds_target": self.rounds_target,
                        "small_blind": self.small_blind, "big_blind": self.big_blind,
-                       "start_stack": self.start_stack, "bounty_27": self.bounty_27},
+                       "start_stack": self.start_stack, "bounty_27": self.bounty_27,
+                       "turn_seconds": self.turn_seconds},
             "progress": self.progress(),
             "players": [
                 None if s is None else {
@@ -184,6 +304,7 @@ class Room:
 
     async def broadcast_state(self):
         """牌局進行中：每位玩家送公開狀態 + 自己的私有狀態。"""
+        self.refresh_deadline()
         if self.game_type == "poker":
             return await self._broadcast_poker()
         if not self.game:
@@ -200,6 +321,10 @@ class Room:
                          "dice_rule": self.dice_rule, "rounds_target": self.rounds_target}
         pub["dice"] = self.dice_info()
         pub["progress"] = self.progress()
+        pub["deadline_ms"] = self.deadline_ms()
+        pub["turn_seconds"] = self.turn_seconds
+        pub["afk"] = [bool(s and s.afk) for s in self.seats]
+        pub["connected"] = [bool(s and s.connected) for s in self.seats]
         if self.finished:
             pub["standings"] = self.standings()
         for i, seat in enumerate(self.seats):
@@ -217,6 +342,10 @@ class Room:
                          "start_stack": self.start_stack, "bounty_27": self.bounty_27}
         pub["game_type"] = "poker"
         pub["settlement"] = self.table.settlement(self.start_stack)
+        pub["deadline_ms"] = self.deadline_ms()
+        pub["turn_seconds"] = self.turn_seconds
+        pub["afk"] = [bool(s and s.afk) for s in self.seats]
+        pub["connected"] = [bool(s and s.connected) for s in self.seats]
         for i, seat in enumerate(self.seats):
             if seat and seat.connected and seat.ws is not None:
                 msg = {"t": "state", "game_type": "poker", "public": pub,
@@ -487,6 +616,11 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     pass
                 if "bounty_27" in m:
                     room.bounty_27 = bool(m.get("bounty_27"))
+                try:
+                    ts = int(m.get("turn_seconds", room.turn_seconds))
+                    room.turn_seconds = 0 if ts <= 0 else max(5, min(ts, 120))
+                except (TypeError, ValueError):
+                    pass
                 await room.broadcast_lobby()
 
             # ---- 房主開局 ----
@@ -637,6 +771,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
 
             # ---- 德州：下注動作 ----
             elif t == "poker_act" and room and room.table:
+                room.clear_afk(seat_idx)
                 ok = room.table.act(seat_idx, m.get("action"), m.get("amount"))
                 if not ok:
                     await err("這個動作現在不能執行")
@@ -653,6 +788,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
 
             # ---- 牌局動作 ----
             elif t in ("discard", "claim", "self") and room and room.game:
+                room.clear_afk(seat_idx)
                 g = room.game
                 changed = False
                 if t == "discard":
@@ -736,18 +872,55 @@ async def cleanup_rooms(app):
         pass
 
 
+async def turn_watchdog(app):
+    """每 0.5 秒巡一次：有人行動逾時就幫他出手，避免整桌卡死。"""
+    try:
+        while True:
+            await asyncio.sleep(0.5)
+            now = time.time()
+            for room in list(rooms.values()):
+                try:
+                    if room.deadline is None or now < room.deadline:
+                        continue
+                    msgs = room.apply_timeout()
+                    room.refresh_deadline()
+                    for m in msgs:
+                        await room._send_all({"t": "notice", "msg": m})
+                    # 結算（麻將胡牌／德州本手結束）
+                    if room.game_type == "poker":
+                        if room.table and room.table.phase == "over":
+                            for i, s in enumerate(room.seats):
+                                if s and i in room.table.players:
+                                    pp = room.table.players[i]
+                                    s.score = pp.stack - room.start_stack - pp.rebuy_total
+                    elif room.game and room.game.phase == "over":
+                        room.settle()
+                    await room.broadcast_state()
+                    if ((room.game_type == "poker" and room.table
+                         and room.table.phase == "over")
+                            or (room.game and room.game.phase == "over")):
+                        await room.broadcast_lobby()
+                except Exception:
+                    # 單一房間出錯不能影響其他房間
+                    room.deadline = None
+    except asyncio.CancelledError:
+        pass
+
+
 async def _on_start(app):
     app["cleanup"] = asyncio.create_task(cleanup_rooms(app))
+    app["watchdog"] = asyncio.create_task(turn_watchdog(app))
 
 
 async def _on_cleanup(app):
-    task = app.get("cleanup")
-    if task:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+    for key in ("cleanup", "watchdog"):
+        task = app.get(key)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 def make_app() -> web.Application:

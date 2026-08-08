@@ -145,7 +145,10 @@ function renderPoker(pub, pri, mySeat){
       `</div></div>`+
       (p.bet>0?`<div class="pk-bet"><span class="chip c-inline"></span>${money(p.bet)}</div>`:"")+
       (p.last_action?`<div class="pk-act">${p.last_action}</div>`:"")+
-      (shown?`<div class="pk-desc">${shown.desc}</div>`:"");
+      (shown?`<div class="pk-desc">${shown.desc}</div>`:"")+
+      ((pub.afk && pub.afk[p.seat])?'<div class="tag-afk">暫離</div>':"")+
+      ((pub.connected && pub.connected[p.seat]===false)?'<div class="tag-off">斷線</div>':"");
+    if(pub.to_act===p.seat) el.appendChild(timerEl());   // 輪到他 → 顯示倒數
     box.appendChild(el);
   });
 
@@ -196,6 +199,7 @@ function renderPoker(pub, pri, mySeat){
   }
 
   renderPokerActions(pub, pri, mySeat);
+  updateTimerUI();     // 重繪會重建倒數元件，立刻填值才不會閃一下空白
   renderPoker._hand=pub.hand_no;
 }
 
@@ -239,6 +243,12 @@ function renderPokerActions(pub, pri, mySeat){
 
   const acts=pri.actions||{};
   if(!Object.keys(acts).length) return;
+
+  // 輪到我 → 動作列上放大顯示倒數
+  if(pub.to_act===mySeat){
+    const t=timerEl(); t.classList.add("mine");
+    bar.appendChild(t);
+  }
 
   const add=(label,cls,fn)=>{
     const b=document.createElement("button"); b.textContent=label;

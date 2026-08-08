@@ -804,3 +804,32 @@ button.ghost { background: transparent; }
 .river-box.left .discards, .river-box.right .discards {
   grid-template-columns: repeat(3, auto);
 }
+
+/* ---------- 行動倒數 ---------- */
+.turn-timer { display: flex; align-items: center; gap: 5px; margin-top: 3px; }
+.turn-timer .tt-num { font-size: 12px; font-weight: 800; color: #fff;
+                      min-width: 15px; text-align: right;
+                      text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+.turn-timer .tt-track { flex: 1; min-width: 40px; height: 5px; border-radius: 3px;
+                        background: rgba(0,0,0,.45); overflow: hidden; }
+.turn-timer .tt-bar { display: block; height: 100%; width: 100%;
+                      background: #6bffa0; transition: width .2s linear; }
+.turn-timer.urgent .tt-bar { background: #ff5a5a; }
+.turn-timer.urgent .tt-num { color: #ff5a5a; animation: tt-blink .5s steps(2) infinite; }
+@keyframes tt-blink { 50% { opacity: .35; } }
+/* 自己的倒數（德州動作列）放大一點 */
+.turn-timer.mine { min-width: 120px; }
+.turn-timer.mine .tt-num { font-size: 18px; min-width: 24px; }
+.turn-timer.mine .tt-track { height: 7px; }
+/* 橫幅上的倒數 */
+#turn-banner .turn-timer { margin-top: 4px; }
+#turn-banner .tt-num { color: #04351b; }
+#turn-banner .tt-track { background: rgba(0,0,0,.22); }
+#turn-banner .tt-bar { background: #04351b; }
+
+/* 斷線 / 暫離標記 */
+.tag-off, .tag-afk { display: inline-block; font-size: 10px; font-weight: 800;
+  padding: 1px 6px; border-radius: 10px; margin-left: 5px; vertical-align: middle; }
+.tag-off { background: #a02c2c; color: #fff; }
+.tag-afk { background: #7a6a2a; color: #ffe9a8; }
+.pk-seat .tag-off, .pk-seat .tag-afk { margin-left: 0; margin-top: 2px; }
