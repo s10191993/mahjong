@@ -316,7 +316,8 @@ class Room:
             return await self._broadcast_poker()
         if not self.game:
             return
-        pub = self.game.public_state()
+        g = self.game
+        pub = g.public_state()
         # 把座位名字、分數塞進 public 方便前端顯示
         for i, sp in enumerate(pub["players"]):
             seat = self.seats[i]
@@ -336,7 +337,14 @@ class Room:
             pub["standings"] = self.standings()
         for i, seat in enumerate(self.seats):
             if seat and seat.connected and seat.ws is not None:
-                msg = {"t": "state", "public": pub, "private": self.game.private_state(i),
+                # 反應階段（有人可以吃碰槓胡）對「不能反應的人」要完全隱藏，
+                # 否則光看倒數與停頓就知道有人在考慮碰牌。
+                p = pub
+                if g.phase == "await_reaction" and i not in g.pending:
+                    p = dict(pub)
+                    p["phase"] = "waiting"       # 中性狀態：沒有我的事
+                    p["deadline_ms"] = None
+                msg = {"t": "state", "public": p, "private": self.game.private_state(i),
                        "hand_no": self.hand_no}
                 await self._safe_send(seat.ws, msg)
 
@@ -581,13 +589,24 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     continue
                 room = r
                 seat_idx = idx
+                old = r.seats[idx].ws
                 r.seats[idx].ws = ws
                 r.seats[idx].connected = True
+                r.seats[idx].voice = False      # 語音要重新開，舊的 peer 連線已失效
+                # 同一座位若還掛著另一條舊連線，主動關掉，避免兩條連線打架
+                if old is not None and old is not ws:
+                    try:
+                        await old.close()
+                    except Exception:
+                        pass
                 await send({"t": "joined", "code": code, "seat": idx, "token": token,
                             "game_type": r.game_type})
                 await room.broadcast_lobby()
-                if room.game:
+                # 德州用的是 room.table 不是 room.game，原本只判斷 game
+                # 會讓德州玩家重連後收不到牌桌狀態、卡在等待室。
+                if room.game or room.table:
                     await room.broadcast_state()
+                await room._send_all({"t": "voice_peers", "peers": room.voice_peers()})
 
             # ---- 房主設定底/台/骰規 ----
             elif t == "set_config":
@@ -847,10 +866,14 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     await room.broadcast_lobby()
 
     finally:
-        if room and seat_idx is not None and room.seats[seat_idx]:
-            room.seats[seat_idx].connected = False
-            room.seats[seat_idx].ws = None
-            room.seats[seat_idx].voice = False      # 斷線就離開語音
+        seat = room.seats[seat_idx] if (room and seat_idx is not None) else None
+        # 只有「座位目前仍綁在這條連線」時才標記斷線。
+        # 手機在隧道／電梯裡常常是舊連線半死不活，人已經用新連線重連成功，
+        # 舊連線幾十秒後才真正關閉；若無條件清掉就會把剛回來的人再踢下線。
+        if seat and seat.ws is ws:
+            seat.connected = False
+            seat.ws = None
+            seat.voice = False      # 斷線就離開語音
             try:
                 await room.broadcast_lobby()
                 await room._send_all({"t": "voice_peers",

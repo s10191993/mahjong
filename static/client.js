@@ -587,16 +587,19 @@ function renderTable(){
     ? "換你決定！" : "輪到你出牌";
   if(myTurn) banner.appendChild(timerEl());   // 自己的倒數放在橫幅上
   banner.classList.toggle("show", myTurn);
-  // 標出目前輪到的那一家（座位區整塊發光）
+  // 標出目前輪到的那一家（座位區整塊發光）。
+  // 反應階段不標任何人 —— 那時 turn 還停在剛打牌的人身上，
+  // 若繼續發光等於告訴大家「有人正在考慮吃碰胡」。
+  const showTurnMark = (pub.phase==="await_discard");
   ["top","left","right","bottom"].forEach(p=>{
     const el=document.querySelector(`.seat-area.${p}`);
-    if(el) el.classList.toggle("is-turn",
-      pub.phase!=="over" && relPos(pub.turn)===p);
+    if(el) el.classList.toggle("is-turn", showTurnMark && relPos(pub.turn)===p);
   });
 
   // 輪到誰的指向箭頭（指向當前出牌者）
   const ptr=document.getElementById("turn-pointer");
-  if(pub.phase==="over"){
+  if(!showTurnMark){
+    // 結束或反應階段都不指 —— 反應階段還指著剛打牌的人會洩漏「有人在考慮」
     ptr.style.display="none";
   }else{
     const rot={bottom:180, right:90, top:0, left:270}[relPos(pub.turn)];
