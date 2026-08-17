@@ -849,3 +849,29 @@ button.ghost { background: transparent; }
 }
 @keyframes mic-pulse { from { transform: scale(1); } to { transform: scale(1.25); } }
 .nameplate { position: relative; }
+
+/* ---------- 出牌手勢：點兩下 / 往上拉 ---------- */
+.hand .tile { transition: transform .12s, box-shadow .12s; will-change: transform; }
+/* 選起來的那張：升起 + 金框，提示「再點一次就打出」 */
+.hand .tile.selected {
+  transform: translateY(-14px);
+  box-shadow: 0 0 0 3px var(--gold), 0 10px 16px rgba(0,0,0,.55);
+  z-index: 3;
+}
+/* 已經拉到可以放手的距離 */
+.hand .tile.drag-ready {
+  transition: none;
+  box-shadow: 0 0 0 3px #6bffa0, 0 14px 22px rgba(0,0,0,.6);
+}
+.hand .tile:active { transition: none; }
+#discard-hint {
+  display: none; margin: 0 auto 3px; width: fit-content;
+  font-size: 12px; font-weight: 700; color: #4a3500;
+  background: var(--gold); padding: 2px 12px; border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.4);
+}
+#discard-hint.show { display: block; }
+@media (max-height: 520px) {
+  #discard-hint { font-size: 11px; padding: 1px 9px; margin-bottom: 2px; }
+  .hand .tile.selected { transform: translateY(-10px); }
+}

@@ -794,11 +794,12 @@ function renderMe(pub, pri){
     const i=rest.indexOf(pri.drawn);
     if(i>=0){ rest.splice(i,1); drawn=pri.drawn; }
   }
+  let idx=0;
   const addTile=(c,extra)=>{
     const t=tileEl(c, extra||"");
     if(canDiscard){
-      t.onclick=()=> send({t:"discard", tile:c});
-      t.title="點擊打出 "+tileName(c);
+      attachDiscard(t, c, idx++);
+      t.title="點兩下、或往上拉，打出 "+tileName(c);
     }else{
       t.style.cursor="default";
     }
@@ -806,6 +807,70 @@ function renderMe(pub, pri){
   };
   rest.forEach(c=> addTile(c));
   if(drawn) addTile(drawn, "just-drawn");
+  if(!canDiscard) selectedIdx=null;      // 不是我的回合就清掉選取
+  applySelected();
+}
+
+// ---- 出牌手勢：點兩下 或 往上拉（避免手滑誤打）----
+let selectedIdx = null;          // 目前選起來的那張（手牌中的位置）
+const DRAG_OUT = 34;             // 往上拉超過這距離就算打出
+const TAP_SLOP = 8;              // 移動小於這距離才算「點」而不是「拉」
+
+function applySelected(){
+  document.querySelectorAll("#my-hand .tile").forEach((el,i)=>{
+    el.classList.toggle("selected", i===selectedIdx);
+  });
+  const hint=document.getElementById("discard-hint");
+  if(hint) hint.classList.toggle("show", selectedIdx!==null);
+}
+
+function doDiscard(code){
+  selectedIdx=null;
+  applySelected();
+  send({t:"discard", tile:code});
+}
+
+function attachDiscard(el, code, idx){
+  el.style.touchAction="none";     // 拖曳時不要讓頁面跟著捲動
+  let startX=0, startY=0, dragging=false, moved=false;
+
+  el.addEventListener("pointerdown", (e)=>{
+    startX=e.clientX; startY=e.clientY;
+    dragging=true; moved=false;
+    el.setPointerCapture?.(e.pointerId);
+  });
+
+  el.addEventListener("pointermove", (e)=>{
+    if(!dragging) return;
+    const dx=e.clientX-startX, dy=e.clientY-startY;
+    if(Math.hypot(dx,dy)>TAP_SLOP) moved=true;
+    if(moved){
+      // 只跟著往上移動，讓「拉出去」的感覺明確
+      const lift=Math.min(0, dy);
+      el.style.transform=`translate(${dx*0.35}px, ${lift}px)`;
+      el.classList.toggle("drag-ready", lift <= -DRAG_OUT);
+    }
+  });
+
+  const finish=(e)=>{
+    if(!dragging) return;
+    dragging=false;
+    const dy=e.clientY-startY;
+    const pulledOut = moved && dy <= -DRAG_OUT;
+    el.style.transform="";
+    el.classList.remove("drag-ready");
+    if(pulledOut){
+      doDiscard(code);                    // 往上拉出去 → 直接打出
+    }else if(!moved){
+      // 純點擊：第一下選取、同一張再點一下才真的打出
+      if(selectedIdx===idx) doDiscard(code);
+      else { selectedIdx=idx; applySelected(); SFX.play("draw_tile"); }
+    }
+  };
+  el.addEventListener("pointerup", finish);
+  el.addEventListener("pointercancel", ()=>{
+    dragging=false; el.style.transform=""; el.classList.remove("drag-ready");
+  });
 }
 
 function renderActions(pub, pri){

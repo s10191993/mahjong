@@ -100,11 +100,18 @@ async def test_mahjong_manual_clears_afk():
     await drain(ws, 0.4)
     stt = await recv_until(ws, {"state"}, timeout=3) or st
     hand = stt["private"]["hand"]
+    for w in conns:
+        await drain(w, 0.2)
     await ws.send(json.dumps({"t": "discard", "tile": hand[0]}))
-    st2 = await recv_until(conns[0], {"state"}, timeout=4)
-    assert st2, "打牌後應收到新狀態"
-    d2 = st2["public"]["deadline_ms"]
-    print(f"    打牌前倒數 {d1}ms → 打牌後重新計時 {d2}ms ✔")
+    # 反應階段會對「非當事人」遮罩掉倒數（見 test_hidden_reaction），
+    # 所以要從真正輪到／能反應的那一家去讀 deadline，不能固定看 conns[0]。
+    deadlines = []
+    for w in conns:
+        s = await recv_until(w, {"state"}, timeout=4)
+        assert s, "打牌後每家都應收到新狀態"
+        deadlines.append(s["public"]["deadline_ms"])
+    d2 = max((x for x in deadlines if x is not None), default=None)
+    print(f"    打牌前倒數 {d1}ms → 打牌後重新計時 {d2}ms（各家 {deadlines}）✔")
     assert d2 is not None and d2 > d1 - 3000, "換人行動後倒數應重新計時"
     for w in conns:
         await w.close()
