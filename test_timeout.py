@@ -1,63 +1,12 @@
 # -*- coding: utf-8 -*-
 """行動倒數／逾時自動出手測試（需先啟動 server.py）。"""
-import asyncio, json, sys, time
-import websockets
-
-URL = "ws://localhost:8080/ws"
-
-
-async def recv_until(ws, types, timeout=8):
-    try:
-        async with asyncio.timeout(timeout):
-            while True:
-                m = json.loads(await ws.recv())
-                if m.get("t") in types:
-                    return m
-    except Exception:
-        return None
-
-
-async def collect(ws, seconds):
-    """收集一段時間內的所有訊息。"""
-    out = []
-    try:
-        async with asyncio.timeout(seconds):
-            while True:
-                out.append(json.loads(await ws.recv()))
-    except Exception:
-        pass
-    return out
-
-
-async def drain(ws, t=0.3):
-    await collect(ws, t)
-
-
-async def make_room(game_type, n, turn_seconds):
-    conns = []
-    w0 = await websockets.connect(URL)
-    conns.append(w0)
-    await w0.send(json.dumps({"t": "create", "name": "P0", "game_type": game_type}))
-    j = await recv_until(w0, {"joined"})
-    code = j["code"]
-    for i in range(1, n):
-        w = await websockets.connect(URL)
-        conns.append(w)
-        await w.send(json.dumps({"t": "join", "code": code, "name": f"P{i}"}))
-        await recv_until(w, {"joined"})
-    for w in conns:
-        await drain(w)
-    await w0.send(json.dumps({"t": "set_config", "turn_seconds": turn_seconds}))
-    room = await recv_until(w0, {"room"})
-    assert room["config"]["turn_seconds"] == turn_seconds, room["config"]
-    for w in conns:
-        await drain(w)
-    return conns, code
-
+import asyncio, json, time
+from ws_test_util import (URL, connect, recv_until, collect, drain,
+                          send, make_room, close_all, run)
 
 async def test_mahjong():
     print("[1] 麻將：沒人動作 → 自動打出、牌局繼續")
-    conns, code = await make_room("mahjong", 4, 5)
+    conns, _, code = await make_room("mahjong", 4, 5)
     await conns[0].send(json.dumps({"t": "start"}))
     st = await recv_until(conns[0], {"state"}, timeout=6)
     assert st, "應已開局"
@@ -89,7 +38,7 @@ async def test_mahjong():
 
 async def test_mahjong_manual_clears_afk():
     print("\n[2] 麻將：自己動作後倒數重新計時、暫離解除")
-    conns, code = await make_room("mahjong", 4, 6)
+    conns, _, code = await make_room("mahjong", 4, 6)
     await conns[0].send(json.dumps({"t": "start"}))
     st = await recv_until(conns[0], {"state"}, timeout=6)
     pub = st["public"]
@@ -119,7 +68,7 @@ async def test_mahjong_manual_clears_afk():
 
 async def test_poker():
     print("\n[3] 德州：逾時自動過牌／蓋牌")
-    conns, code = await make_room("poker", 3, 5)
+    conns, _, code = await make_room("poker", 3, 5)
     await conns[0].send(json.dumps({"t": "start"}))
     st = await recv_until(conns[0], {"state"}, timeout=6)
     assert st and st["public"]["phase"] == "preflop"
@@ -142,7 +91,7 @@ async def test_poker():
 
 async def test_off():
     print("\n[4] 倒數可關閉（turn_seconds = 0）")
-    conns, code = await make_room("mahjong", 4, 0)
+    conns, _, code = await make_room("mahjong", 4, 0)
     await conns[0].send(json.dumps({"t": "start"}))
     st = await recv_until(conns[0], {"state"}, timeout=6)
     assert st["public"].get("deadline_ms") is None, "關閉時不該有倒數"
@@ -163,8 +112,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-    asyncio.run(main())
+    run(main)

@@ -1,55 +1,12 @@
 # -*- coding: utf-8 -*-
 """斷線重連測試（需先啟動 server.py）。"""
-import asyncio, json, sys
-import websockets
-
-URL = "ws://localhost:8080/ws"
-
-
-async def recv_until(ws, types, timeout=6):
-    try:
-        async with asyncio.timeout(timeout):
-            while True:
-                m = json.loads(await ws.recv())
-                if m.get("t") in types:
-                    return m
-    except Exception:
-        return None
-
-
-async def drain(ws, t=0.3):
-    try:
-        async with asyncio.timeout(t):
-            while True:
-                await ws.recv()
-    except Exception:
-        pass
-
-
-async def setup(game_type="mahjong", n=4, turn_seconds=60):
-    conns, tokens = [], []
-    w0 = await websockets.connect(URL)
-    await w0.send(json.dumps({"t": "create", "name": "P0", "game_type": game_type}))
-    j = await recv_until(w0, {"joined"})
-    code = j["code"]
-    conns.append(w0); tokens.append(j["token"])
-    for i in range(1, n):
-        w = await websockets.connect(URL)
-        await w.send(json.dumps({"t": "join", "code": code, "name": f"P{i}"}))
-        jj = await recv_until(w, {"joined"})
-        conns.append(w); tokens.append(jj["token"])
-    for w in conns:
-        await drain(w)
-    await w0.send(json.dumps({"t": "set_config", "turn_seconds": turn_seconds}))
-    await recv_until(w0, {"room"})
-    for w in conns:
-        await drain(w)
-    return conns, tokens, code
-
+import asyncio, json
+from ws_test_util import (URL, connect, recv_until, collect, drain,
+                          send, make_room, close_all, run)
 
 async def main():
     print("[1] 牌局中斷線 → 其他人看得到「斷線」")
-    conns, tokens, code = await setup()
+    conns, tokens, code = await make_room(turn_seconds=60)
     await conns[0].send(json.dumps({"t": "start"}))
     st = await recv_until(conns[0], {"state"})
     assert st, "應已開局"
@@ -65,7 +22,7 @@ async def main():
     print(f"    座位2 斷線，其他人看到 connected=False ✔")
 
     print("\n[2] 重連 → 回到原座位、拿回手牌與牌桌狀態")
-    w2 = await websockets.connect(URL)
+    w2 = await connect()
     await w2.send(json.dumps({"t": "reconnect", "code": code, "token": tokens[2]}))
     j = await recv_until(w2, {"joined"})
     assert j and j["seat"] == 2, f"應回到座位2，實得 {j}"
@@ -85,7 +42,7 @@ async def main():
     # 手機在隧道裡常是「舊連線半死不活、人已用新連線回來」，
     # 舊連線幾十秒後才關閉。模擬：再開一條連線用同一 token 重連，
     # 然後關掉「前一條」，座位必須維持已連線。
-    w2b = await websockets.connect(URL)
+    w2b = await connect()
     await w2b.send(json.dumps({"t": "reconnect", "code": code, "token": tokens[2]}))
     jb = await recv_until(w2b, {"joined"})
     assert jb and jb["seat"] == 2, jb
@@ -119,7 +76,7 @@ async def main():
             await w.close()
         except Exception:
             pass
-    pconns, ptokens, pcode = await setup("poker", 3)
+    pconns, ptokens, pcode = await make_room("poker", 3, turn_seconds=60)
     await pconns[0].send(json.dumps({"t": "start"}))
     st = await recv_until(pconns[0], {"state"})
     assert st and st["public"]["phase"] == "preflop"
@@ -131,7 +88,7 @@ async def main():
         await drain(w)
     await pconns[1].close()
     await asyncio.sleep(0.6)
-    w1 = await websockets.connect(URL)
+    w1 = await connect()
     await w1.send(json.dumps({"t": "reconnect", "code": pcode, "token": ptokens[1]}))
     j = await recv_until(w1, {"joined"})
     assert j and j["seat"] == 1, j
@@ -150,8 +107,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-    asyncio.run(main())
+    run(main)

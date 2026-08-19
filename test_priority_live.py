@@ -8,58 +8,10 @@
   [B] 能碰的人完全不回應（發呆／斷線）→ 逾時自動過，吃的人正常吃到、牌局繼續
   [C] 吃的人看不出「有別人也在考慮碰」
 """
-import asyncio, json, sys
-import websockets
+import asyncio, json
 import mahjong as mj
-
-URL = "ws://localhost:8080/ws"
-
-
-async def recv_until(ws, types, timeout=6):
-    try:
-        async with asyncio.timeout(timeout):
-            while True:
-                m = json.loads(await ws.recv())
-                if m.get("t") in types:
-                    return m
-    except Exception:
-        return None
-
-
-async def collect(ws, seconds):
-    out = []
-    try:
-        async with asyncio.timeout(seconds):
-            while True:
-                out.append(json.loads(await ws.recv()))
-    except Exception:
-        pass
-    return out
-
-
-async def drain(ws, t=0.3):
-    await collect(ws, t)
-
-
-async def make_room(turn_seconds):
-    conns = []
-    w0 = await websockets.connect(URL)
-    conns.append(w0)
-    await w0.send(json.dumps({"t": "create", "name": "P0"}))
-    code = (await recv_until(w0, {"joined"}))["code"]
-    for i in range(1, 4):
-        w = await websockets.connect(URL)
-        conns.append(w)
-        await w.send(json.dumps({"t": "join", "code": code, "name": f"P{i}"}))
-        await recv_until(w, {"joined"})
-    for w in conns:
-        await drain(w)
-    await w0.send(json.dumps({"t": "set_config", "turn_seconds": turn_seconds}))
-    await recv_until(w0, {"room"})
-    for w in conns:
-        await drain(w)
-    return conns, code
-
+from ws_test_util import (URL, connect, recv_until, collect, drain,
+                          send, make_room, close_all, run)
 
 async def deal_until_chow_vs_pong(conns, max_tries=40):
     """一直重新發牌，直到出現「下家能吃、另一家能碰同一張」的局面。
@@ -100,7 +52,7 @@ async def deal_until_chow_vs_pong(conns, max_tries=40):
 
 async def test_chow_then_pong():
     print("[A] 吃的人先按，碰的人後按 → 碰贏，牌局繼續")
-    conns, code = await make_room(60)          # 倒數拉長，先不讓逾時介入
+    conns, _, code = await make_room(turn_seconds=60)          # 倒數拉長，先不讓逾時介入
     found = await deal_until_chow_vs_pong(conns)
     assert found, "40 副牌都沒湊到吃碰同張的情境"
     dealer, tile, chower, ponger = found
@@ -153,7 +105,7 @@ async def test_chow_then_pong():
 
 async def test_pong_player_never_responds():
     print("\n[B] 能碰的人完全不回應 → 逾時自動過，吃的人正常吃到")
-    conns, code = await make_room(5)           # 短倒數，逼出逾時
+    conns, _, code = await make_room(turn_seconds=5)           # 短倒數，逼出逾時
     found = await deal_until_chow_vs_pong(conns)
     assert found, "40 副牌都沒湊到吃碰同張的情境"
     dealer, tile, chower, ponger = found
@@ -192,8 +144,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-    asyncio.run(main())
+    run(main)

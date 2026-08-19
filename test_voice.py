@@ -5,52 +5,13 @@
 只測伺服器負責的部分：誰開了語音、offer/answer/ICE 有沒有正確送到對的人、
 以及不同房間之間不會互相看到。實際音訊走 WebRTC 點對點，不經過伺服器。
 """
-import asyncio, json, sys
-import websockets
-
-URL = "ws://localhost:8080/ws"
-
-
-async def recv_until(ws, types, timeout=4):
-    try:
-        async with asyncio.timeout(timeout):
-            while True:
-                m = json.loads(await ws.recv())
-                if m.get("t") in types:
-                    return m
-    except Exception:
-        return None
-
-
-async def drain(ws, t=0.3):
-    try:
-        async with asyncio.timeout(t):
-            while True:
-                await ws.recv()
-    except Exception:
-        pass
-
-
-async def make_room(n=3, game_type="mahjong"):
-    conns = []
-    w0 = await websockets.connect(URL)
-    conns.append(w0)
-    await w0.send(json.dumps({"t": "create", "name": "P0", "game_type": game_type}))
-    j = await recv_until(w0, {"joined"})
-    code = j["code"]
-    for i in range(1, n):
-        w = await websockets.connect(URL)
-        conns.append(w)
-        await w.send(json.dumps({"t": "join", "code": code, "name": f"P{i}"}))
-        await recv_until(w, {"joined"})
-    for w in conns:
-        await drain(w)
-    return conns, code
-
+import asyncio, json
+from ws_test_util import (URL, connect, recv_until, collect, drain,
+                          send, make_room, close_all, run)
 
 async def main():
     print("[1] 開語音 → 全房收到名單")
-    conns, code = await make_room(3)
+    conns, _, code = await make_room(n=3)
     await conns[0].send(json.dumps({"t": "voice_state", "on": True}))
     for i in (1, 2):
         m = await recv_until(conns[i], {"voice_peers"})
@@ -102,7 +63,7 @@ async def main():
     print("    只送給指定座位，第三人收不到 ✔")
 
     print("\n[4] 跨房間不會互通")
-    conns2, code2 = await make_room(2)
+    conns2, _, code2 = await make_room(n=2)
     for w in conns + conns2:
         await drain(w)
     await conns2[0].send(json.dumps({"t": "voice_state", "on": True}))
@@ -137,8 +98,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-    asyncio.run(main())
+    run(main)

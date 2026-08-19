@@ -1,35 +1,13 @@
 # -*- coding: utf-8 -*-
 """德州撲克連線流程測試（需先啟動 server.py）。"""
-import asyncio, json, sys
-import websockets
-
-URL = "ws://localhost:8080/ws"
-
-
-async def recv_until(ws, types, timeout=4):
-    try:
-        async with asyncio.timeout(timeout):
-            while True:
-                m = json.loads(await ws.recv())
-                if m.get("t") in types:
-                    return m
-    except Exception:
-        return None
-
-
-async def drain(ws, t=0.25):
-    try:
-        async with asyncio.timeout(t):
-            while True:
-                await ws.recv()
-    except Exception:
-        pass
-
+import asyncio, json
+from ws_test_util import (URL, connect, recv_until, collect, drain,
+                          send, make_room, close_all, run)
 
 async def main():
     print("[1] 開德州房、8 人加入")
     conns = []
-    w0 = await websockets.connect(URL); conns.append(w0)
+    w0 = await connect(); conns.append(w0)
     await w0.send(json.dumps({"t": "create", "name": "P0", "game_type": "poker"}))
     j = await recv_until(w0, {"joined"})
     assert j and j["game_type"] == "poker", j
@@ -39,14 +17,14 @@ async def main():
     print(f"    房號 {code}｜最多 {room['max_seats']} 人｜最少 {room['min_players']} 人開局 ✔")
 
     for i in range(1, 8):
-        w = await websockets.connect(URL); conns.append(w)
+        w = await connect(); conns.append(w)
         await w.send(json.dumps({"t": "join", "code": code, "name": f"P{i}"}))
         jj = await recv_until(w, {"joined"})
         assert jj, f"P{i} 加入失敗"
     print("    8 人入座 ✔")
 
     # 第 9 人應被擋
-    w9 = await websockets.connect(URL)
+    w9 = await connect()
     await w9.send(json.dumps({"t": "join", "code": code, "name": "P8"}))
     e = await recv_until(w9, {"error"}, timeout=2)
     assert e and "已滿" in e["msg"], e
@@ -145,8 +123,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-    asyncio.run(main())
+    run(main)

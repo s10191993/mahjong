@@ -5,42 +5,20 @@
 有人可以吃／碰／槓／胡時，「不能反應的人」不該從收到的狀態看出任何端倪
 ——否則光看倒數和停頓就知道別人在考慮碰牌。
 """
-import asyncio, json, sys
-import websockets
-
-URL = "ws://localhost:8080/ws"
-
-
-async def recv_until(ws, types, timeout=6):
-    try:
-        async with asyncio.timeout(timeout):
-            while True:
-                m = json.loads(await ws.recv())
-                if m.get("t") in types:
-                    return m
-    except Exception:
-        return None
-
-
-async def drain(ws, t=0.3):
-    try:
-        async with asyncio.timeout(t):
-            while True:
-                await ws.recv()
-    except Exception:
-        pass
-
+import asyncio, json
+from ws_test_util import (URL, connect, recv_until, collect, drain,
+                          send, make_room, close_all, run)
 
 async def main():
     print("[1] 開一局，關掉倒數避免干擾")
     conns = []
-    w0 = await websockets.connect(URL)
+    w0 = await connect()
     conns.append(w0)
     await w0.send(json.dumps({"t": "create", "name": "P0"}))
     j = await recv_until(w0, {"joined"})
     code = j["code"]
     for i in range(1, 4):
-        w = await websockets.connect(URL)
+        w = await connect()
         conns.append(w)
         await w.send(json.dumps({"t": "join", "code": code, "name": f"P{i}"}))
         await recv_until(w, {"joined"})
@@ -127,8 +105,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-    asyncio.run(main())
+    run(main)

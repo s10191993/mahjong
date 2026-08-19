@@ -1,51 +1,12 @@
 # -*- coding: utf-8 -*-
 """測試「離開房間」與「重開牌局」流程（需先啟動 server.py）。"""
-import asyncio, json, sys
-import websockets
-
-URL = "ws://localhost:8080/ws"
-
-
-async def recv_until(ws, types, timeout=3):
-    """收訊息直到拿到指定型別之一，回傳該訊息；逾時回 None。"""
-    try:
-        async with asyncio.timeout(timeout):
-            while True:
-                m = json.loads(await ws.recv())
-                if m.get("t") in types:
-                    return m
-    except (asyncio.TimeoutError, Exception):
-        return None
-
-
-async def drain(ws, t=0.25):
-    try:
-        async with asyncio.timeout(t):
-            while True:
-                await ws.recv()
-    except Exception:
-        pass
-
-
-async def make_room(n=4):
-    """開一間房並讓 n 人入座，回傳 (conns, code)。"""
-    conns = []
-    ws0 = await websockets.connect(URL); conns.append(ws0)
-    await ws0.send(json.dumps({"t": "create", "name": "房主"}))
-    m = await recv_until(ws0, {"joined"})
-    code = m["code"]
-    for i in range(1, n):
-        w = await websockets.connect(URL); conns.append(w)
-        await w.send(json.dumps({"t": "join", "code": code, "name": f"玩家{i}"}))
-        await recv_until(w, {"joined"})
-    for w in conns:
-        await drain(w)
-    return conns, code
-
+import asyncio, json
+from ws_test_util import (URL, connect, recv_until, collect, drain,
+                          send, make_room, close_all, run)
 
 async def test_leave_in_waiting():
     print("\n[1] 等待室離開：座位釋出、其他人看得到")
-    conns, code = await make_room(4)
+    conns, _, code = await make_room(n=4, names=["房主", "玩家1", "玩家2", "玩家3"])
     await conns[2].send(json.dumps({"t": "leave"}))
     left = await recv_until(conns[2], {"left"})
     assert left, "離開者應收到 left"
@@ -60,7 +21,7 @@ async def test_leave_in_waiting():
 
 async def test_host_leave_transfers():
     print("\n[2] 房主離開：房主自動轉移給其他人")
-    conns, code = await make_room(4)
+    conns, _, code = await make_room(n=4, names=["房主", "玩家1", "玩家2", "玩家3"])
     await conns[0].send(json.dumps({"t": "leave"}))
     await recv_until(conns[0], {"left"})
     room = await recv_until(conns[1], {"room"})
@@ -74,7 +35,7 @@ async def test_host_leave_transfers():
 
 async def test_leave_during_game():
     print("\n[3] 牌局中離開：本局中止，其他人回等待室")
-    conns, code = await make_room(4)
+    conns, _, code = await make_room(n=4, names=["房主", "玩家1", "玩家2", "玩家3"])
     await conns[0].send(json.dumps({"t": "start"}))
     st = await recv_until(conns[1], {"state"})
     assert st, "應已開局"
@@ -93,7 +54,7 @@ async def test_leave_during_game():
 
 async def test_restart():
     print("\n[4] 重開牌局：重新發牌、非房主不能按")
-    conns, code = await make_room(4)
+    conns, _, code = await make_room(n=4, names=["房主", "玩家1", "玩家2", "玩家3"])
     await conns[0].send(json.dumps({"t": "start"}))
     st1 = await recv_until(conns[1], {"state"})
     hand1 = st1["private"]["hand"]
@@ -127,12 +88,12 @@ async def test_restart():
 
 async def test_all_leave_closes_room():
     print("\n[5] 全部離開：房間自動回收")
-    conns, code = await make_room(2)
+    conns, _, code = await make_room(n=2, names=["房主", "玩家1"])
     for w in conns:
         await w.send(json.dumps({"t": "leave"}))
         await recv_until(w, {"left"})
     # 再嘗試加入該房應失敗
-    w = await websockets.connect(URL)
+    w = await connect()
     await w.send(json.dumps({"t": "join", "code": code, "name": "路人"}))
     e = await recv_until(w, {"error"}, timeout=2)
     assert e, "房間應已不存在"
@@ -152,8 +113,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-    asyncio.run(main())
+    run(main)

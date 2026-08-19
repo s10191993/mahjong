@@ -36,10 +36,26 @@
 | `game.py` | 單局狀態機：發牌、補花、摸打、吃碰槓胡優先權、台數。`python game.py` 跑 300 局隨機對局測試 |
 | `server.py` | 連線伺服器（網頁 + WebSocket 同一程序）。伺服器權威，防作弊 |
 | `static/` | 前端牌桌（index.html / style.css / client.js） |
+| `ws_test_util.py` | 連線測試的共用工具（開房、收送、逾時），網址可用 `MJ_TEST_URL` 指定 |
+| `run_tests.py` | **一鍵跑完整測試**：自己在隨機埠起伺服器、跑完收掉 |
 | `test_client.py` | 4 條連線的端到端測試 |
 | `test_priority.py` | 反應優先權（胡＞槓＞碰＞吃）引擎測試，含時序與非法動作 |
 | `test_priority_live.py` | 同上但走連線層：吃碰同張的等待、能碰者不回應的逾時保護 |
 | `fill_bots.py` | 放機器人進既有房間補位（一個人也能測） |
+
+## 跑測試
+
+```bash
+python run_tests.py
+```
+
+會自己在隨機埠起一個乾淨的伺服器再跑，**不需要先手動開 server.py**。
+
+- `python run_tests.py poker` 只跑檔名含 poker 的
+- `python run_tests.py --fast` 跳過要等真實倒數的慢測試
+- 新增 `test_*.py` 忘了登記進 `PURE` / `LIVE` 會直接被擋下來，不會靜悄悄漏跑
+- 伺服器端若有未處理例外，就算客戶端測試「通過」也會判定失敗
+  （處理器一炸只會讓該連線斷掉，測試往往只是變慢然後照樣過，這種 bug 最難發現）
 
 ## 如何啟動
 

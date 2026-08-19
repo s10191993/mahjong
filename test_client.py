@@ -4,11 +4,9 @@
 驗證：開房/加入/開局/摸打/吃碰槓胡/結算 的通訊協定與伺服器狀態機。
 需先啟動 server.py（預設 http://localhost:8080）。
 """
-import asyncio, json, random, sys
-import websockets
-
-URL = "ws://localhost:8080/ws"
-
+import asyncio, json, random
+from ws_test_util import (URL, connect, recv_until, collect, drain,
+                          send, make_room, close_all, run)
 
 class Bot:
     def __init__(self, name, rng):
@@ -32,7 +30,7 @@ async def run_game():
     # 連線
     conns = []
     for b in bots:
-        b.ws = await websockets.connect(URL)
+        b.ws = await connect()
         conns.append(b.ws)
 
     # 座位0開房
@@ -155,8 +153,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-    asyncio.run(main())
+    run(main)

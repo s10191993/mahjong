@@ -491,23 +491,471 @@ class Room:
                 self.finished = True
             else:
                 self.round_wind = SEAT_WINDS[self.round_index % 4]
+# ---------------------------------------------------------------------------
+# WebSocket：連線情境與訊息處理器
+#
+# 以前這裡是一個 390 行的 ws_handler，裡面 16 個 if/elif 分支共用
+# room / seat_idx 兩個閉包變數。任何一個分支忘了處理某種房型，
+# 從外面完全看不出來——德州玩家重連收不到牌桌狀態就是這樣漏掉的。
+# 現在每種訊息各自一個函式，需要什麼前提由 @handles(requires=...) 宣告。
+# ---------------------------------------------------------------------------
+class Conn:
+    """一條 WebSocket 連線目前的處境：坐在哪間房、哪個座位。"""
+
+    def __init__(self, ws: web.WebSocketResponse):
+        self.ws = ws
+        self.room: Room | None = None
+        self.seat: int | None = None
+
+    async def send(self, payload: dict):
+        await self.ws.send_json(payload)
+
+    async def err(self, msg: str):
+        await self.send({"t": "error", "msg": msg})
+
+    async def detach(self):
+        """連線結束：把座位標成斷線。
+
+        只有「座位目前仍綁在這條連線」時才動它。手機在隧道／電梯裡常常是
+        舊連線半死不活、人已經用新連線重連成功，舊連線幾十秒後才真正關閉；
+        若無條件清掉就會把剛回來的人再踢下線。
+        """
+        if self.room is None or self.seat is None:
+            return
+        seat = self.room.seats[self.seat]
+        if not seat or seat.ws is not self.ws:
+            return
+        seat.connected = False
+        seat.ws = None
+        seat.voice = False          # 斷線就離開語音
+        try:
+            await self.room.broadcast_lobby()
+            await self.room._send_all({"t": "voice_peers",
+                                       "peers": self.room.voice_peers()})
+        except Exception:
+            pass
 
 
-# ---------------------------------------------------------------------------
-# WebSocket 處理
-# ---------------------------------------------------------------------------
+#: 訊息型別 -> (處理函式, 前提)
+HANDLERS: dict[str, tuple] = {}
+
+#: 各種前提怎麼檢查。前提不成立就當作沒收到這則訊息（與改版前的
+#: 「條件不符就掉到下一個 elif、最後什麼都沒發生」行為一致）。
+_REQUIRES = {
+    None:     lambda c: True,
+    "seated": lambda c: c.room is not None and c.seat is not None,
+    "table":  lambda c: c.room is not None and c.room.table is not None,
+    "game":   lambda c: c.room is not None and c.room.game is not None,
+}
+
+
+def handles(*types: str, requires: str | None = None):
+    """把一個函式註冊成某幾種訊息型別的處理器。"""
+    assert requires in _REQUIRES, f"未知的前提：{requires}"
+
+    def deco(fn):
+        for t in types:
+            assert t not in HANDLERS, f"訊息型別 {t} 被註冊兩次"
+            HANDLERS[t] = (fn, _REQUIRES[requires])
+        return fn
+    return deco
+
+
+# ---- 大廳：開房 ----
+@handles("create")
+async def h_create(conn: Conn, m: dict):
+    name = (m.get("name") or "玩家").strip()[:12]
+    code = new_code()
+    conn.room = Room(code, game_type=m.get("game_type") or "mahjong")
+    rooms[code] = conn.room
+    token = secrets.token_hex(8)
+    seat = Seat(name, token)
+    seat.ws = conn.ws
+    seat.connected = True
+    conn.room.seats[0] = seat
+    conn.room.host_seat = 0
+    conn.seat = 0
+    await conn.send({"t": "joined", "code": code, "seat": 0, "token": token,
+                "game_type": conn.room.game_type})
+    await conn.room.broadcast_lobby()
+
+
+# ---- 大廳：加入 ----
+@handles("join")
+async def h_join(conn: Conn, m: dict):
+    code = (m.get("code") or "").strip().upper()
+    name = (m.get("name") or "玩家").strip()[:12]
+    r = rooms.get(code)
+    if not r:
+        await conn.err("找不到這個房間")
+        return
+    # 麻將固定 4 人，開局後不能加入；德州是現金桌，隨時可入座
+    if r.game_type != "poker" and r.game is not None:
+        await conn.err("牌局已開始，無法加入")
+        return
+    free = r.find_free_seat()
+    if free is None:
+        await conn.err(f"房間已滿（{r.max_seats} 人）")
+        return
+    token = secrets.token_hex(8)
+    seat = Seat(name, token)
+    seat.ws = conn.ws
+    seat.connected = True
+    r.seats[free] = seat
+    conn.room = r
+    conn.seat = free
+    # 德州牌局進行中入座：這手先旁觀，下一手才發牌
+    mid_game = (r.game_type == "poker" and r.table is not None)
+    if mid_game:
+        r.table.join_mid_game(free, name, r.start_stack)
+    await conn.send({"t": "joined", "code": code, "seat": free, "token": token,
+                "game_type": r.game_type})
+    await conn.room.broadcast_lobby()
+    if mid_game:
+        await r._send_all({"t": "notice",
+                           "msg": f"{name} 入座，下一手開始"})
+        await conn.room.broadcast_state()   # 直接把他帶進牌桌畫面
+
+
+# ---- 重新連線 ----
+@handles("reconnect")
+async def h_reconnect(conn: Conn, m: dict):
+    code = (m.get("code") or "").strip().upper()
+    token = m.get("token") or ""
+    r = rooms.get(code)
+    if not r:
+        # 伺服器重啟／房間已回收 → 請前端清掉舊紀錄回大廳
+        await conn.send({"t": "reconnect_failed",
+                    "msg": "先前的房間已結束，請重新開房或加入"})
+        return
+    idx = r.seat_of_token(token)
+    if idx is None:
+        await conn.send({"t": "reconnect_failed",
+                    "msg": "座位已不存在，請重新加入"})
+        return
+    conn.room = r
+    conn.seat = idx
+    old = r.seats[idx].ws
+    r.seats[idx].ws = conn.ws
+    r.seats[idx].connected = True
+    r.seats[idx].voice = False      # 語音要重新開，舊的 peer 連線已失效
+    # 同一座位若還掛著另一條舊連線，主動關掉，避免兩條連線打架
+    if old is not None and old is not conn.ws:
+        try:
+            await old.close()
+        except Exception:
+            pass
+    await conn.send({"t": "joined", "code": code, "seat": idx, "token": token,
+                "game_type": r.game_type})
+    await conn.room.broadcast_lobby()
+    # 德州用的是 conn.room.table 不是 conn.room.game，原本只判斷 game
+    # 會讓德州玩家重連後收不到牌桌狀態、卡在等待室。
+    if conn.room.game or conn.room.table:
+        await conn.room.broadcast_state()
+    await conn.room._send_all({"t": "voice_peers", "peers": conn.room.voice_peers()})
+
+
+# ---- 房主設定底/台/骰規 ----
+@handles("set_config")
+async def h_set_config(conn: Conn, m: dict):
+    if not conn.room or conn.seat != conn.room.host_seat:
+        await conn.err("只有房主可以修改設定")
+        return
+    if conn.room.game is not None:
+        await conn.err("牌局進行中無法改設定")
+        return
+    try:
+        b = int(m.get("base", conn.room.base))
+        tv = int(m.get("tai_value", conn.room.tai_value))
+        conn.room.base = max(0, min(b, 100000))
+        conn.room.tai_value = max(0, min(tv, 100000))
+    except (TypeError, ValueError):
+        pass
+    conn.room.dice_rule = bool(m.get("dice_rule", conn.room.dice_rule))
+    try:
+        rt = int(m.get("rounds_target", conn.room.rounds_target))
+        if rt in (1, 2, 4):
+            conn.room.rounds_target = rt
+    except (TypeError, ValueError):
+        pass
+    # 德州：大小盲與起始籌碼
+    try:
+        sb = int(m.get("small_blind", conn.room.small_blind))
+        bb = int(m.get("big_blind", conn.room.big_blind))
+        stk = int(m.get("start_stack", conn.room.start_stack))
+        conn.room.small_blind = max(1, min(sb, 100000))
+        conn.room.big_blind = max(conn.room.small_blind, min(bb, 200000))
+        conn.room.start_stack = max(conn.room.big_blind * 2, min(stk, 10000000))
+    except (TypeError, ValueError):
+        pass
+    if "bounty_27" in m:
+        conn.room.bounty_27 = bool(m.get("bounty_27"))
+    try:
+        ts = int(m.get("turn_seconds", conn.room.turn_seconds))
+        conn.room.turn_seconds = 0 if ts <= 0 else max(5, min(ts, 120))
+    except (TypeError, ValueError):
+        pass
+    await conn.room.broadcast_lobby()
+
+
+# ---- 房主開局 ----
+@handles("start")
+async def h_start(conn: Conn, m: dict):
+    if not conn.room or conn.seat != conn.room.host_seat:
+        await conn.err("只有房主可以開局")
+        return
+    if conn.room.occupied() < conn.room.min_players:
+        await conn.err(f"要 {conn.room.min_players} 個人才能開局")
+        return
+    if conn.room.game_type == "poker":
+        conn.room.table = PokerTable(conn.room.small_blind, conn.room.big_blind,
+                                conn.room.start_stack,
+                                bounty_27=conn.room.bounty_27)
+        for i, s in enumerate(conn.room.seats):
+            if s:
+                conn.room.table.seat_player(i, s.name)
+        conn.room.table.start_hand(bomb_pot=bool(m.get("bomb_pot")))
+        if conn.room.table.is_bomb:
+            await conn.room._send_all({"t": "notice",
+                "msg": f"💣 炸彈彩池！每家底注 {conn.room.table.big_blind*conn.room.table.BOMB_ANTE_BB}，直接翻牌"})
+        await conn.room.broadcast_state()
+        await conn.room.broadcast_lobby()
+        return
+    # 擲骰決定莊家（從房主位置起算）
+    for s in conn.room.seats:
+        if s:
+            s.score = 0
+    conn.room.hand_no = 0
+    sd = conn.room.roll_for_dealer(from_seat=conn.room.host_seat)
+    dealer_name = conn.room.seats[sd["dealer"]].name if conn.room.seats[sd["dealer"]] else ""
+    await conn.room._send_all({
+        "t": "dealer_roll",
+        "dice": sd["values"], "total": sd["total"],
+        "dealer": sd["dealer"], "dealer_name": dealer_name,
+        "msg": f"🎲 {'·'.join(map(str, sd['values']))} = {sd['total']} → {dealer_name} 做莊",
+    })
+    await asyncio.sleep(1.6)      # 讓大家看清楚骰子結果
+    conn.room.start_new_hand()
+    await conn.room.broadcast_state()
+
+
+# ---- 離開房間（退出牌局，回大廳）----
+@handles("leave")
+async def h_leave(conn: Conn, m: dict):
+    if not conn.room or conn.seat is None:
+        await conn.send({"t": "left"})
+        return
+    r, idx = conn.room, conn.seat
+    r.seats[idx] = None
+    # 德州：牌局不中止，離開者蓋牌讓局繼續（這手結束才真正移除）
+    if r.game_type == "poker" and r.table is not None:
+        nm = r.table.players.get(idx).name if idx in r.table.players else ""
+        r.table.mark_left(idx)
+        await r._send_all({"t": "notice", "msg": f"{nm} 離開了牌桌"})
+        if r.occupied() > 0:
+            await r.broadcast_state()
+    # 麻將：進行中有人退出 → 中止本局，其他人回等待室（分數保留）
+    elif r.game is not None:
+        r.abandon_game()
+        await r._send_all({"t": "notice",
+                           "msg": "有玩家離開，本局中止，回到等待室"})
+    r.reassign_host()
+    r.touch()
+    await conn.send({"t": "left"})        # 通知自己已離開
+    conn.room, conn.seat = None, None
+    if r.occupied() == 0:
+        rooms.pop(r.code, None)      # 沒人了就收掉房間
+    else:
+        await r.broadcast_lobby()
+
+
+# ---- 房主重開牌局（重新洗牌發牌，分數保留）----
+@handles("restart")
+async def h_restart(conn: Conn, m: dict):
+    if not conn.room or conn.seat != conn.room.host_seat:
+        await conn.err("只有房主可以重開牌局")
+        return
+    if conn.room.occupied() < conn.room.min_players:
+        await conn.err(f"要 {conn.room.min_players} 個人才能開局")
+        return
+    conn.room.abandon_game()
+    if conn.room.finished:
+        # 整場已打完 → 重開新的一場：分數歸零、重新擲骰決定莊家
+        for s in conn.room.seats:
+            if s:
+                s.score = 0
+        conn.room.hand_no = 0
+        sd = conn.room.roll_for_dealer(from_seat=conn.room.host_seat)
+        nm = conn.room.seats[sd["dealer"]].name if conn.room.seats[sd["dealer"]] else ""
+        await conn.room._send_all({
+            "t": "dealer_roll", "dice": sd["values"], "total": sd["total"],
+            "dealer": sd["dealer"], "dealer_name": nm,
+            "msg": f"🎲 {'·'.join(map(str, sd['values']))} = {sd['total']} → {nm} 做莊"})
+        await asyncio.sleep(1.6)
+    else:
+        await conn.room._send_all({"t": "notice", "msg": "房主重開了牌局"})
+    conn.room.start_new_hand()
+    await conn.room.broadcast_state()
+
+
+# ---- 下一局 ----
+@handles("next")
+async def h_next(conn: Conn, m: dict):
+    if not conn.room or conn.seat != conn.room.host_seat:
+        await conn.err("只有房主可以開下一局")
+        return
+    if conn.room.game_type == "poker":
+        if not conn.room.table:
+            await conn.err("還沒開始")
+            return
+        if len(conn.room.table.active_seats()) < 2:
+            await conn.err("剩下的人不足 2 位，請重開牌局")
+            return
+        conn.room.table.start_hand(bomb_pot=bool(m.get("bomb_pot")))
+        if conn.room.table.is_bomb:
+            await conn.room._send_all({"t": "notice",
+                "msg": f"💣 炸彈彩池！每家底注 {conn.room.table.big_blind*conn.room.table.BOMB_ANTE_BB}，直接翻牌"})
+        await conn.room.broadcast_state()
+        return
+    if conn.room.finished:
+        await conn.err("整場已結束，請按「重開牌局」開始新的一場")
+        return
+    if conn.room.game and conn.room.game.phase == "over":
+        conn.room.start_new_hand()
+        await conn.room.broadcast_state()
+
+
+# ---- 語音：宣告自己開/關語音 ----
+@handles("voice_state", requires="seated")
+async def h_voice_state(conn: Conn, m: dict):
+    st = conn.room.seats[conn.seat]
+    if st:
+        st.voice = bool(m.get("on"))
+    await conn.room._send_all({"t": "voice_peers",
+                          "peers": conn.room.voice_peers()})
+
+
+# ---- 語音：WebRTC 信令轉發（offer / answer / ice）----
+# 音訊本身走點對點，伺服器只幫忙牽線，不碰任何語音資料。
+@handles("rtc", requires="seated")
+async def h_rtc(conn: Conn, m: dict):
+    try:
+        to = int(m.get("to"))
+    except (TypeError, ValueError):
+        return
+    if not (0 <= to < len(conn.room.seats)):
+        return
+    target = conn.room.seats[to]
+    if not target or not target.connected or target.ws is None:
+        return
+    await conn.room._safe_send(target.ws, {
+        "t": "rtc",
+        "from": conn.seat,          # 由伺服器填，不信任前端
+        "kind": m.get("kind"),
+        "data": m.get("data"),
+    })
+
+
+# ---- 德州：秀牌（沒攤牌就收池的贏家可選擇亮牌，2-7 才領得到獎金）----
+@handles("poker_show", requires="table")
+async def h_poker_show(conn: Conn, m: dict):
+    if not conn.room.table.show_cards(conn.seat):
+        await conn.err("現在不能秀牌")
+        return
+    nm = conn.room.seats[conn.seat].name if conn.room.seats[conn.seat] else ""
+    b = (conn.room.table.result or {}).get("bounty27")
+    msg = f"{nm} 秀牌"
+    if b:
+        msg = f"🎉 {nm} 用 2-7 收池！每家付 {b['each']}，共收 {b['total']}"
+    await conn.room._send_all({"t": "notice", "msg": msg})
+    await conn.room.broadcast_state()
+
+
+# ---- 德州：補碼 ----
+@handles("rebuy", requires="table")
+async def h_rebuy(conn: Conn, m: dict):
+    amt = m.get("amount")
+    try:
+        amt = int(amt)
+    except (TypeError, ValueError):
+        amt = 0
+    if not conn.room.table.rebuy(conn.seat, amt):
+        await conn.err("現在不能補碼（籌碼未低於 300、或牌局進行中）")
+        return
+    nm = conn.room.seats[conn.seat].name if conn.room.seats[conn.seat] else ""
+    await conn.room._send_all({"t": "notice", "msg": f"{nm} 補碼 {amt}"})
+    await conn.room.broadcast_state()
+
+
+# ---- 德州：下注動作 ----
+@handles("poker_act", requires="table")
+async def h_poker_act(conn: Conn, m: dict):
+    conn.room.clear_afk(conn.seat)
+    ok = conn.room.table.act(conn.seat, m.get("action"), m.get("amount"))
+    if not ok:
+        await conn.err("這個動作現在不能執行")
+        return
+    await conn.room.broadcast_state()
+    if conn.room.table.phase == "over":
+        # 把籌碼同步回座位分數，方便大廳顯示
+        for i, s in enumerate(conn.room.seats):
+            if s and i in conn.room.table.players:
+                pp = conn.room.table.players[i]
+                # 淨輸贏＝目前籌碼 −（起始籌碼＋補碼總額）
+                s.score = pp.stack - conn.room.start_stack - pp.rebuy_total
+        await conn.room.broadcast_lobby()
+
+
+# ---- 麻將牌局動作 ----
+async def _mahjong_move(conn: Conn, apply):
+    """麻將三種動作共用的流程。
+
+    合法性一律由引擎判斷（伺服器權威），apply 回 False 就是不合法。
+    """
+    conn.room.clear_afk(conn.seat)
+    g = conn.room.game
+    if not apply(g):
+        await conn.err("這個動作現在不能執行")
+        return
+    if g.phase == "over":
+        conn.room.settle()
+    await conn.room.broadcast_state()
+    if g.phase == "over":
+        await conn.room.broadcast_lobby()
+
+
+@handles("discard", requires="game")
+async def h_discard(conn: Conn, m: dict):
+    await _mahjong_move(conn, lambda g: g.discard(conn.seat, m.get("tile")))
+
+
+@handles("claim", requires="game")
+async def h_claim(conn: Conn, m: dict):
+    """對別人打出的牌反應：吃／碰／槓／胡／過。
+
+    誰贏由引擎依優先權裁決，而且要等所有有反應權的人都回覆才結算。
+    """
+    await _mahjong_move(
+        conn, lambda g: g.claim(conn.seat, m.get("action"), m.get("tiles")))
+
+
+@handles("self", requires="game")
+async def h_self(conn: Conn, m: dict):
+    """自己手上就能成立的動作：自摸／暗槓／加槓。"""
+    tile = m.get("tile")
+    moves = {
+        "tsumo":   lambda g: g.declare_tsumo(conn.seat),
+        "ankong":  lambda g: g.declare_ankong(conn.seat, tile),
+        "addkong": lambda g: g.declare_addkong(conn.seat, tile),
+    }
+    # 不認識的 action 一律當作不合法，回「現在不能執行」
+    await _mahjong_move(conn, moves.get(m.get("action"), lambda g: False))
+
+
 async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse(heartbeat=30)
     await ws.prepare(request)
-    room: Room | None = None
-    seat_idx: int | None = None
-
-    async def send(payload):
-        await ws.send_json(payload)
-
-    async def err(msg):
-        await send({"t": "error", "msg": msg})
-
+    conn = Conn(ws)
     try:
         async for raw in ws:
             if raw.type != WSMsgType.TEXT:
@@ -516,370 +964,15 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                 m = json.loads(raw.data)
             except Exception:
                 continue
-            t = m.get("t")
-            if room:
-                room.touch()          # 有動作就更新活躍時間（給房間清理判斷）
-
-            # ---- 大廳：開房 ----
-            if t == "create":
-                name = (m.get("name") or "玩家").strip()[:12]
-                code = new_code()
-                room = Room(code, game_type=m.get("game_type") or "mahjong")
-                rooms[code] = room
-                token = secrets.token_hex(8)
-                seat = Seat(name, token)
-                seat.ws = ws
-                seat.connected = True
-                room.seats[0] = seat
-                room.host_seat = 0
-                seat_idx = 0
-                await send({"t": "joined", "code": code, "seat": 0, "token": token,
-                            "game_type": room.game_type})
-                await room.broadcast_lobby()
-
-            # ---- 大廳：加入 ----
-            elif t == "join":
-                code = (m.get("code") or "").strip().upper()
-                name = (m.get("name") or "玩家").strip()[:12]
-                r = rooms.get(code)
-                if not r:
-                    await err("找不到這個房間")
-                    continue
-                # 麻將固定 4 人，開局後不能加入；德州是現金桌，隨時可入座
-                if r.game_type != "poker" and r.game is not None:
-                    await err("牌局已開始，無法加入")
-                    continue
-                free = r.find_free_seat()
-                if free is None:
-                    await err(f"房間已滿（{r.max_seats} 人）")
-                    continue
-                token = secrets.token_hex(8)
-                seat = Seat(name, token)
-                seat.ws = ws
-                seat.connected = True
-                r.seats[free] = seat
-                room = r
-                seat_idx = free
-                # 德州牌局進行中入座：這手先旁觀，下一手才發牌
-                mid_game = (r.game_type == "poker" and r.table is not None)
-                if mid_game:
-                    r.table.join_mid_game(free, name, r.start_stack)
-                await send({"t": "joined", "code": code, "seat": free, "token": token,
-                            "game_type": r.game_type})
-                await room.broadcast_lobby()
-                if mid_game:
-                    await r._send_all({"t": "notice",
-                                       "msg": f"{name} 入座，下一手開始"})
-                    await room.broadcast_state()   # 直接把他帶進牌桌畫面
-
-            # ---- 重新連線 ----
-            elif t == "reconnect":
-                code = (m.get("code") or "").strip().upper()
-                token = m.get("token") or ""
-                r = rooms.get(code)
-                if not r:
-                    # 伺服器重啟／房間已回收 → 請前端清掉舊紀錄回大廳
-                    await send({"t": "reconnect_failed",
-                                "msg": "先前的房間已結束，請重新開房或加入"})
-                    continue
-                idx = r.seat_of_token(token)
-                if idx is None:
-                    await send({"t": "reconnect_failed",
-                                "msg": "座位已不存在，請重新加入"})
-                    continue
-                room = r
-                seat_idx = idx
-                old = r.seats[idx].ws
-                r.seats[idx].ws = ws
-                r.seats[idx].connected = True
-                r.seats[idx].voice = False      # 語音要重新開，舊的 peer 連線已失效
-                # 同一座位若還掛著另一條舊連線，主動關掉，避免兩條連線打架
-                if old is not None and old is not ws:
-                    try:
-                        await old.close()
-                    except Exception:
-                        pass
-                await send({"t": "joined", "code": code, "seat": idx, "token": token,
-                            "game_type": r.game_type})
-                await room.broadcast_lobby()
-                # 德州用的是 room.table 不是 room.game，原本只判斷 game
-                # 會讓德州玩家重連後收不到牌桌狀態、卡在等待室。
-                if room.game or room.table:
-                    await room.broadcast_state()
-                await room._send_all({"t": "voice_peers", "peers": room.voice_peers()})
-
-            # ---- 房主設定底/台/骰規 ----
-            elif t == "set_config":
-                if not room or seat_idx != room.host_seat:
-                    await err("只有房主可以修改設定")
-                    continue
-                if room.game is not None:
-                    await err("牌局進行中無法改設定")
-                    continue
-                try:
-                    b = int(m.get("base", room.base))
-                    tv = int(m.get("tai_value", room.tai_value))
-                    room.base = max(0, min(b, 100000))
-                    room.tai_value = max(0, min(tv, 100000))
-                except (TypeError, ValueError):
-                    pass
-                room.dice_rule = bool(m.get("dice_rule", room.dice_rule))
-                try:
-                    rt = int(m.get("rounds_target", room.rounds_target))
-                    if rt in (1, 2, 4):
-                        room.rounds_target = rt
-                except (TypeError, ValueError):
-                    pass
-                # 德州：大小盲與起始籌碼
-                try:
-                    sb = int(m.get("small_blind", room.small_blind))
-                    bb = int(m.get("big_blind", room.big_blind))
-                    stk = int(m.get("start_stack", room.start_stack))
-                    room.small_blind = max(1, min(sb, 100000))
-                    room.big_blind = max(room.small_blind, min(bb, 200000))
-                    room.start_stack = max(room.big_blind * 2, min(stk, 10000000))
-                except (TypeError, ValueError):
-                    pass
-                if "bounty_27" in m:
-                    room.bounty_27 = bool(m.get("bounty_27"))
-                try:
-                    ts = int(m.get("turn_seconds", room.turn_seconds))
-                    room.turn_seconds = 0 if ts <= 0 else max(5, min(ts, 120))
-                except (TypeError, ValueError):
-                    pass
-                await room.broadcast_lobby()
-
-            # ---- 房主開局 ----
-            elif t == "start":
-                if not room or seat_idx != room.host_seat:
-                    await err("只有房主可以開局")
-                    continue
-                if room.occupied() < room.min_players:
-                    await err(f"要 {room.min_players} 個人才能開局")
-                    continue
-                if room.game_type == "poker":
-                    room.table = PokerTable(room.small_blind, room.big_blind,
-                                            room.start_stack,
-                                            bounty_27=room.bounty_27)
-                    for i, s in enumerate(room.seats):
-                        if s:
-                            room.table.seat_player(i, s.name)
-                    room.table.start_hand(bomb_pot=bool(m.get("bomb_pot")))
-                    if room.table.is_bomb:
-                        await room._send_all({"t": "notice",
-                            "msg": f"💣 炸彈彩池！每家底注 {room.table.big_blind*room.table.BOMB_ANTE_BB}，直接翻牌"})
-                    await room.broadcast_state()
-                    await room.broadcast_lobby()
-                    continue
-                # 擲骰決定莊家（從房主位置起算）
-                for s in room.seats:
-                    if s:
-                        s.score = 0
-                room.hand_no = 0
-                sd = room.roll_for_dealer(from_seat=room.host_seat)
-                dealer_name = room.seats[sd["dealer"]].name if room.seats[sd["dealer"]] else ""
-                await room._send_all({
-                    "t": "dealer_roll",
-                    "dice": sd["values"], "total": sd["total"],
-                    "dealer": sd["dealer"], "dealer_name": dealer_name,
-                    "msg": f"🎲 {'·'.join(map(str, sd['values']))} = {sd['total']} → {dealer_name} 做莊",
-                })
-                await asyncio.sleep(1.6)      # 讓大家看清楚骰子結果
-                room.start_new_hand()
-                await room.broadcast_state()
-
-            # ---- 離開房間（退出牌局，回大廳）----
-            elif t == "leave":
-                if not room or seat_idx is None:
-                    await send({"t": "left"})
-                    continue
-                r, idx = room, seat_idx
-                r.seats[idx] = None
-                # 德州：牌局不中止，離開者蓋牌讓局繼續（這手結束才真正移除）
-                if r.game_type == "poker" and r.table is not None:
-                    nm = r.table.players.get(idx).name if idx in r.table.players else ""
-                    r.table.mark_left(idx)
-                    await r._send_all({"t": "notice", "msg": f"{nm} 離開了牌桌"})
-                    if r.occupied() > 0:
-                        await r.broadcast_state()
-                # 麻將：進行中有人退出 → 中止本局，其他人回等待室（分數保留）
-                elif r.game is not None:
-                    r.abandon_game()
-                    await r._send_all({"t": "notice",
-                                       "msg": "有玩家離開，本局中止，回到等待室"})
-                r.reassign_host()
-                r.touch()
-                await send({"t": "left"})        # 通知自己已離開
-                room, seat_idx = None, None
-                if r.occupied() == 0:
-                    rooms.pop(r.code, None)      # 沒人了就收掉房間
-                else:
-                    await r.broadcast_lobby()
-
-            # ---- 房主重開牌局（重新洗牌發牌，分數保留）----
-            elif t == "restart":
-                if not room or seat_idx != room.host_seat:
-                    await err("只有房主可以重開牌局")
-                    continue
-                if room.occupied() < room.min_players:
-                    await err(f"要 {room.min_players} 個人才能開局")
-                    continue
-                room.abandon_game()
-                if room.finished:
-                    # 整場已打完 → 重開新的一場：分數歸零、重新擲骰決定莊家
-                    for s in room.seats:
-                        if s:
-                            s.score = 0
-                    room.hand_no = 0
-                    sd = room.roll_for_dealer(from_seat=room.host_seat)
-                    nm = room.seats[sd["dealer"]].name if room.seats[sd["dealer"]] else ""
-                    await room._send_all({
-                        "t": "dealer_roll", "dice": sd["values"], "total": sd["total"],
-                        "dealer": sd["dealer"], "dealer_name": nm,
-                        "msg": f"🎲 {'·'.join(map(str, sd['values']))} = {sd['total']} → {nm} 做莊"})
-                    await asyncio.sleep(1.6)
-                else:
-                    await room._send_all({"t": "notice", "msg": "房主重開了牌局"})
-                room.start_new_hand()
-                await room.broadcast_state()
-
-            # ---- 下一局 ----
-            elif t == "next":
-                if not room or seat_idx != room.host_seat:
-                    await err("只有房主可以開下一局")
-                    continue
-                if room.game_type == "poker":
-                    if not room.table:
-                        await err("還沒開始")
-                        continue
-                    if len(room.table.active_seats()) < 2:
-                        await err("剩下的人不足 2 位，請重開牌局")
-                        continue
-                    room.table.start_hand(bomb_pot=bool(m.get("bomb_pot")))
-                    if room.table.is_bomb:
-                        await room._send_all({"t": "notice",
-                            "msg": f"💣 炸彈彩池！每家底注 {room.table.big_blind*room.table.BOMB_ANTE_BB}，直接翻牌"})
-                    await room.broadcast_state()
-                    continue
-                if room.finished:
-                    await err("整場已結束，請按「重開牌局」開始新的一場")
-                    continue
-                if room.game and room.game.phase == "over":
-                    room.start_new_hand()
-                    await room.broadcast_state()
-
-            # ---- 語音：宣告自己開/關語音 ----
-            elif t == "voice_state" and room and seat_idx is not None:
-                st = room.seats[seat_idx]
-                if st:
-                    st.voice = bool(m.get("on"))
-                await room._send_all({"t": "voice_peers",
-                                      "peers": room.voice_peers()})
-
-            # ---- 語音：WebRTC 信令轉發（offer / answer / ice）----
-            # 音訊本身走點對點，伺服器只幫忙牽線，不碰任何語音資料。
-            elif t == "rtc" and room and seat_idx is not None:
-                try:
-                    to = int(m.get("to"))
-                except (TypeError, ValueError):
-                    continue
-                if not (0 <= to < len(room.seats)):
-                    continue
-                target = room.seats[to]
-                if not target or not target.connected or target.ws is None:
-                    continue
-                await room._safe_send(target.ws, {
-                    "t": "rtc",
-                    "from": seat_idx,          # 由伺服器填，不信任前端
-                    "kind": m.get("kind"),
-                    "data": m.get("data"),
-                })
-
-            # ---- 德州：秀牌（沒攤牌就收池的贏家可選擇亮牌，2-7 才領得到獎金）----
-            elif t == "poker_show" and room and room.table:
-                if not room.table.show_cards(seat_idx):
-                    await err("現在不能秀牌")
-                    continue
-                nm = room.seats[seat_idx].name if room.seats[seat_idx] else ""
-                b = (room.table.result or {}).get("bounty27")
-                msg = f"{nm} 秀牌"
-                if b:
-                    msg = f"🎉 {nm} 用 2-7 收池！每家付 {b['each']}，共收 {b['total']}"
-                await room._send_all({"t": "notice", "msg": msg})
-                await room.broadcast_state()
-
-            # ---- 德州：補碼 ----
-            elif t == "rebuy" and room and room.table:
-                amt = m.get("amount")
-                try:
-                    amt = int(amt)
-                except (TypeError, ValueError):
-                    amt = 0
-                if not room.table.rebuy(seat_idx, amt):
-                    await err("現在不能補碼（籌碼未低於 300、或牌局進行中）")
-                    continue
-                nm = room.seats[seat_idx].name if room.seats[seat_idx] else ""
-                await room._send_all({"t": "notice", "msg": f"{nm} 補碼 {amt}"})
-                await room.broadcast_state()
-
-            # ---- 德州：下注動作 ----
-            elif t == "poker_act" and room and room.table:
-                room.clear_afk(seat_idx)
-                ok = room.table.act(seat_idx, m.get("action"), m.get("amount"))
-                if not ok:
-                    await err("這個動作現在不能執行")
-                    continue
-                await room.broadcast_state()
-                if room.table.phase == "over":
-                    # 把籌碼同步回座位分數，方便大廳顯示
-                    for i, s in enumerate(room.seats):
-                        if s and i in room.table.players:
-                            pp = room.table.players[i]
-                            # 淨輸贏＝目前籌碼 −（起始籌碼＋補碼總額）
-                            s.score = pp.stack - room.start_stack - pp.rebuy_total
-                    await room.broadcast_lobby()
-
-            # ---- 牌局動作 ----
-            elif t in ("discard", "claim", "self") and room and room.game:
-                room.clear_afk(seat_idx)
-                g = room.game
-                changed = False
-                if t == "discard":
-                    changed = g.discard(seat_idx, m.get("tile"))
-                elif t == "claim":
-                    changed = g.claim(seat_idx, m.get("action"), m.get("tiles"))
-                elif t == "self":
-                    a = m.get("action")
-                    if a == "tsumo":
-                        changed = g.declare_tsumo(seat_idx)
-                    elif a == "ankong":
-                        changed = g.declare_ankong(seat_idx, m.get("tile"))
-                    elif a == "addkong":
-                        changed = g.declare_addkong(seat_idx, m.get("tile"))
-                if not changed:
-                    await err("這個動作現在不能執行")
-                    continue
-                if g.phase == "over":
-                    room.settle()
-                await room.broadcast_state()
-                if g.phase == "over":
-                    await room.broadcast_lobby()
-
+            if conn.room:
+                conn.room.touch()     # 有動作就更新活躍時間（給房間清理判斷）
+            entry = HANDLERS.get(m.get("t"))
+            if entry:
+                fn, ready = entry
+                if ready(conn):
+                    await fn(conn, m)
     finally:
-        seat = room.seats[seat_idx] if (room and seat_idx is not None) else None
-        # 只有「座位目前仍綁在這條連線」時才標記斷線。
-        # 手機在隧道／電梯裡常常是舊連線半死不活，人已經用新連線重連成功，
-        # 舊連線幾十秒後才真正關閉；若無條件清掉就會把剛回來的人再踢下線。
-        if seat and seat.ws is ws:
-            seat.connected = False
-            seat.ws = None
-            seat.voice = False      # 斷線就離開語音
-            try:
-                await room.broadcast_lobby()
-                await room._send_all({"t": "voice_peers",
-                                      "peers": room.voice_peers()})
-            except Exception:
-                pass
+        await conn.detach()
     return ws
 
 
