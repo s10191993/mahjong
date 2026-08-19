@@ -31,7 +31,8 @@ PURE = ["mahjong.py", "game.py", "poker.py", "poker_game.py",
 # 需要連線到伺服器的測試（＝用到 ws_test_util 的）
 LIVE = ["test_client.py", "test_leave_restart.py", "test_priority_live.py",
         "test_hidden_reaction.py", "test_reconnect.py", "test_voice.py",
-        "test_poker_server.py", "test_poker_show_rebuy.py", "test_timeout.py"]
+        "test_poker_server.py", "test_poker_show_rebuy.py",
+        "test_wrong_game_msg.py", "test_timeout.py"]
 
 # 要等真實倒數，--fast 會跳過
 SLOW = {"test_timeout.py", "test_priority_live.py"}

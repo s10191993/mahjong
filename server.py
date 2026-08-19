@@ -16,6 +16,8 @@ import string
 import sys
 import time
 
+from typing import Callable, NamedTuple
+
 from aiohttp import web, WSMsgType
 
 import mahjong as mj
@@ -536,8 +538,14 @@ class Conn:
             pass
 
 
-#: 訊息型別 -> (處理函式, 前提)
-HANDLERS: dict[str, tuple] = {}
+class _Entry(NamedTuple):
+    fn: Callable
+    ready: Callable          # 前提檢查（不成立就當作沒收到）
+    only: str | None         # 只適用的房型；別種房型會回明確錯誤
+
+
+#: 訊息型別 -> _Entry
+HANDLERS: dict[str, _Entry] = {}
 
 #: 各種前提怎麼檢查。前提不成立就當作沒收到這則訊息（與改版前的
 #: 「條件不符就掉到下一個 elif、最後什麼都沒發生」行為一致）。
@@ -549,14 +557,22 @@ _REQUIRES = {
 }
 
 
-def handles(*types: str, requires: str | None = None):
-    """把一個函式註冊成某幾種訊息型別的處理器。"""
+def handles(*types: str, requires: str | None = None,
+            only: str | None = None):
+    """把一個函式註冊成某幾種訊息型別的處理器。
+
+    requires  前提：seated / table / game。不成立就當作沒收到這則訊息。
+    only      這則訊息只適用的房型（mahjong / poker）。房型不符會回明確錯誤，
+              不會讓它跑下去——德州房若吃到麻將的 restart，會把牌桌換成
+              麻將牌局、整間房從此沒有回應，而且不留任何錯誤訊息。
+    """
     assert requires in _REQUIRES, f"未知的前提：{requires}"
+    assert only in (None, "mahjong", "poker"), f"未知的房型：{only}"
 
     def deco(fn):
         for t in types:
             assert t not in HANDLERS, f"訊息型別 {t} 被註冊兩次"
-            HANDLERS[t] = (fn, _REQUIRES[requires])
+            HANDLERS[t] = _Entry(fn, _REQUIRES[requires], only)
         return fn
     return deco
 
@@ -770,7 +786,7 @@ async def h_leave(conn: Conn, m: dict):
 
 
 # ---- 房主重開牌局（重新洗牌發牌，分數保留）----
-@handles("restart")
+@handles("restart", only="mahjong")
 async def h_restart(conn: Conn, m: dict):
     if not conn.room or conn.seat != conn.room.host_seat:
         await conn.err("只有房主可以重開牌局")
@@ -967,10 +983,13 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
             if conn.room:
                 conn.room.touch()     # 有動作就更新活躍時間（給房間清理判斷）
             entry = HANDLERS.get(m.get("t"))
-            if entry:
-                fn, ready = entry
-                if ready(conn):
-                    await fn(conn, m)
+            if not entry or not entry.ready(conn):
+                continue
+            if (entry.only and conn.room is not None
+                    and conn.room.game_type != entry.only):
+                await conn.err("這個動作不適用於目前的牌局")
+                continue
+            await entry.fn(conn, m)
     finally:
         await conn.detach()
     return ws
