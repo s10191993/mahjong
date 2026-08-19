@@ -15,6 +15,7 @@ import secrets
 import string
 import sys
 import time
+import traceback
 
 from typing import Callable, NamedTuple
 
@@ -305,6 +306,25 @@ class Room:
                 for i, s in enumerate(self.seats)
             ],
         }
+
+    @property
+    def hand_over(self) -> bool:
+        """這一手（麻將一局／德州一手）是不是結束了。
+
+        以前每個要判斷的地方都自己寫一次雙房型條件，寫漏一邊
+        就會變成「某種房型結束後不更新大廳」這種只在特定情況才出現的 bug。
+        """
+        engine = self.table if self.game_type == "poker" else self.game
+        return engine is not None and engine.phase == "over"
+
+    def sync_poker_scores(self):
+        """把德州的淨輸贏寫回座位分數（＝目前籌碼 −（起始籌碼＋補碼總額））。"""
+        if self.game_type != "poker" or not self.table:
+            return
+        for i, seat in enumerate(self.seats):
+            if seat and i in self.table.players:
+                pp = self.table.players[i]
+                seat.score = pp.stack - self.start_stack - pp.rebuy_total
 
     async def broadcast_lobby(self):
         payload = self.lobby_payload()
@@ -914,11 +934,7 @@ async def h_poker_act(conn: Conn, m: dict):
     await conn.room.broadcast_state()
     if conn.room.table.phase == "over":
         # 把籌碼同步回座位分數，方便大廳顯示
-        for i, s in enumerate(conn.room.seats):
-            if s and i in conn.room.table.players:
-                pp = conn.room.table.players[i]
-                # 淨輸贏＝目前籌碼 −（起始籌碼＋補碼總額）
-                s.score = pp.stack - conn.room.start_stack - pp.rebuy_total
+        conn.room.sync_poker_scores()
         await conn.room.broadcast_lobby()
 
 
@@ -1059,21 +1075,18 @@ async def turn_watchdog(app):
                     for m in msgs:
                         await room._send_all({"t": "notice", "msg": m})
                     # 結算（麻將胡牌／德州本手結束）
-                    if room.game_type == "poker":
-                        if room.table and room.table.phase == "over":
-                            for i, s in enumerate(room.seats):
-                                if s and i in room.table.players:
-                                    pp = room.table.players[i]
-                                    s.score = pp.stack - room.start_stack - pp.rebuy_total
-                    elif room.game and room.game.phase == "over":
-                        room.settle()
+                    if room.hand_over:
+                        if room.game_type == "poker":
+                            room.sync_poker_scores()
+                        else:
+                            room.settle()
                     await room.broadcast_state()
-                    if ((room.game_type == "poker" and room.table
-                         and room.table.phase == "over")
-                            or (room.game and room.game.phase == "over")):
+                    if room.hand_over:
                         await room.broadcast_lobby()
                 except Exception:
-                    # 單一房間出錯不能影響其他房間
+                    # 單一房間出錯不能影響其他房間，但一定要留下紀錄——
+                    # 這裡原本無聲吞掉，該房的倒數就此永久失效，沒人會發現。
+                    traceback.print_exc()
                     room.deadline = None
     except asyncio.CancelledError:
         pass
