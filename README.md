@@ -60,7 +60,7 @@ python run_tests.py
 ## 如何啟動
 
 ```bash
-python mahjong/server.py
+python server.py
 ```
 
 然後瀏覽器開 **http://localhost:8080**
@@ -121,7 +121,7 @@ iPhone Safari 沒有網頁全螢幕 API，**真正全螢幕要「加到主畫面
 - **想換整副牌**：把整副牌大圖（9 欄 × 5 列排列）丟給切圖腳本即可：
 
 ```bash
-python mahjong/slice_tiles.py "大圖路徑.png"
+python slice_tiles.py "大圖路徑.png"
 ```
 
   它會自動偵測格線、切成 42 張並輸出到 `static/tiles/`，
